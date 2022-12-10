@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
 import 'package:parchment/parchment.dart';
 
 import '../../util.dart';
@@ -745,6 +747,8 @@ class RawEditorState extends EditorState
   // Cursors
   late CursorController _cursorController;
 
+  StreamSubscription<bool>? _keyboardVisibilitySubscription;
+
   FleatherController get controller => widget.controller;
 
   // Selection overlay
@@ -960,6 +964,27 @@ class RawEditorState extends EditorState
 
     // Focus
     effectiveFocusNode.addListener(_handleFocusChanged);
+
+    /// KPW - 11/7/22
+    bool isMobile() {
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+        case TargetPlatform.iOS:
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    /// Only needed for platforms with soft keyboards
+    if (isMobile()) {
+      _keyboardVisibilitySubscription =
+          KeyboardVisibilityController().onChange.listen((bool visible) {
+            if (visible) {
+              Timer(const Duration(milliseconds: 350), _showCaretOnScreen);
+            }
+      });
+    }
   }
 
   @override
@@ -1049,6 +1074,7 @@ class RawEditorState extends EditorState
     _cursorController.dispose();
     _clipboardStatus?.removeListener(_onChangedClipboardStatus);
     _clipboardStatus?.dispose();
+    _keyboardVisibilitySubscription?.cancel();
     super.dispose();
   }
 
