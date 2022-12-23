@@ -14,8 +14,10 @@ import 'package:parchment/parchment.dart';
 abstract class RenderContentProxyBox implements RenderBox {
   double get preferredLineHeight;
 
+  /// Returns the offset at which to paint the caret.
   Offset getOffsetForCaret(TextPosition position, Rect caretPrototype);
 
+  /// Returns the position within the text for the given pixel offset.
   TextPosition getPositionForOffset(Offset offset);
 
   double? getFullHeightForCaret(TextPosition position);
@@ -116,7 +118,7 @@ abstract class RenderEditableBox extends RenderBox {
   /// visually contiguous.
   ///
   /// Valid only after [layout].
-  // List<TextBox> getBoxesForSelection(TextSelection selection);
+  List<TextBox> getBoxesForSelection(TextSelection selection);
 
   /// Returns a point for the base selection handle used on touch-oriented
   /// devices.

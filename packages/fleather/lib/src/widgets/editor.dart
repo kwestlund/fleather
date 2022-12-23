@@ -170,8 +170,8 @@ class FleatherEditor extends StatefulWidget {
   ///
   /// This setting is only honored on iOS devices.
   ///
-  /// Defaults to [Brightness.light].
-  final Brightness keyboardAppearance;
+  /// Defaults to [ThemeData.brightness].
+  final Brightness? keyboardAppearance;
 
   /// The [ScrollPhysics] to use when vertically scrolling the input.
   ///
@@ -224,7 +224,7 @@ class FleatherEditor extends StatefulWidget {
     this.maxContentWidth,
     this.expands = false,
     this.textCapitalization = TextCapitalization.sentences,
-    this.keyboardAppearance = Brightness.light,
+    this.keyboardAppearance,
     this.scrollPhysics,
     this.onLaunchUrl,
     this.embedBuilder = defaultFleatherEmbedBuilder,
@@ -293,6 +293,7 @@ class _FleatherEditorState extends State<FleatherEditor>
     Radius? cursorRadius;
 
     final showSelectionHandles = _mobilePlatforms.contains(theme.platform);
+    final keyboardAppearance = widget.keyboardAppearance ?? theme.brightness;
 
     switch (theme.platform) {
       case TargetPlatform.iOS:
@@ -338,7 +339,7 @@ class _FleatherEditorState extends State<FleatherEditor>
       maxContentWidth: widget.maxContentWidth,
       expands: widget.expands,
       textCapitalization: widget.textCapitalization,
-      keyboardAppearance: widget.keyboardAppearance,
+      keyboardAppearance: keyboardAppearance,
       scrollPhysics: widget.scrollPhysics,
       onLaunchUrl: widget.onLaunchUrl,
       embedBuilder: widget.embedBuilder,
