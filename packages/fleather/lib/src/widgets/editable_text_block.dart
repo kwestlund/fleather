@@ -157,9 +157,11 @@ class EditableTextBlock extends StatelessWidget {
 
       if (lastLevel != null) {
         if (lastLevel == currentLevel) {
-          currentIndex = levelsIndexes[lastLevel]! + 1;
+          // KPW
+          currentIndex = (levelsIndexes[lastLevel] ?? 0) + 1;
         } else if (lastLevel > currentLevel) {
-          currentIndex = levelsIndexes[currentLevel]! + 1;
+          // KPW
+          currentIndex = (levelsIndexes[currentLevel] ?? -1) + 1;
         }
       }
 

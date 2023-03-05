@@ -548,7 +548,8 @@ class FleatherToolbar extends StatefulWidget implements PreferredSizeWidget {
         visible: !hideInlineCode,
         child: ToggleStyleButton(
           attribute: ParchmentAttribute.inlineCode,
-          icon: Icons.code,
+          // KPW
+          icon: Icons.highlight,
           controller: controller,
         ),
       ),
