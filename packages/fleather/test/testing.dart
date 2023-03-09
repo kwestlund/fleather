@@ -3,6 +3,8 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:fleather/fleather.dart';
+import 'package:fleather/src/widgets/editor_input_client_mixin.dart';
+import 'package:fleather/src/widgets/text_selection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quill_delta/quill_delta.dart';
@@ -20,7 +22,8 @@ class EditorSandBox {
     required WidgetTester tester,
     FocusNode? focusNode,
     ParchmentDocument? document,
-    FleatherThemeData? theme,
+    FleatherThemeData? fleatherTheme,
+    ThemeData? theme,
     bool autofocus = false,
   }) {
     focusNode ??= FocusNode();
@@ -33,11 +36,12 @@ class EditorSandBox {
       autofocus: autofocus,
     );
 
-    if (theme != null) {
-      widget = FleatherTheme(data: theme, child: widget);
+    if (fleatherTheme != null) {
+      widget = FleatherTheme(data: fleatherTheme, child: widget);
     }
     widget = MaterialApp(
       home: widget,
+      theme: theme,
     );
 
     return EditorSandBox._(tester, focusNode, document, controller, widget);
@@ -109,6 +113,8 @@ class EditorSandBox {
     return button;
   }
 
+  Finder findSelectionHandles() => find.byType(TextSelectionHandleOverlay);
+
   Future<void> enterText(TextEditingValue text) async {
     return TestAsyncUtils.guard<void>(() async {
       await showKeyboard();
@@ -160,3 +166,48 @@ class _FleatherSandboxState extends State<_FleatherSandbox> {
     });
   }
 }
+
+class TestUpdateWidget extends StatefulWidget {
+  const TestUpdateWidget(
+      {Key? key,
+      required this.focusNodeAfterChange,
+      this.testField = false,
+      this.document})
+      : super(key: key);
+
+  final FocusNode focusNodeAfterChange;
+  final bool testField;
+  final ParchmentDocument? document;
+
+  @override
+  State<StatefulWidget> createState() => TestUpdateWidgetState();
+}
+
+class TestUpdateWidgetState extends State<TestUpdateWidget> {
+  FocusNode? focusNode;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton(
+            onPressed: () =>
+                setState(() => focusNode = widget.focusNodeAfterChange),
+            child: const Text('Change state'),
+          ),
+          widget.testField
+              ? FleatherField(
+                  controller: FleatherController(widget.document),
+                  focusNode: focusNode,
+                )
+              : FleatherEditor(
+                  controller: FleatherController(widget.document),
+                  focusNode: focusNode,
+                ),
+        ],
+      );
+}
+
+RawEditorStateTextInputClientMixin getInputClient() =>
+    (find.byType(RawEditor).evaluate().single as StatefulElement).state
+        as RawEditorStateTextInputClientMixin;

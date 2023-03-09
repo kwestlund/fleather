@@ -29,6 +29,20 @@ import 'text_line.dart';
 import 'text_selection.dart';
 import 'theme.dart';
 
+/// Widget builder function for context menu in [FleatherEditor].
+typedef FleatherContextMenuBuilder = Widget Function(
+  BuildContext context,
+  EditorState editableTextState,
+);
+
+/// Default implementation of a widget builder function for context menu.
+Widget defaultContextMenuBuilder(
+        BuildContext context, EditorState editableTextState) =>
+    AdaptiveTextSelectionToolbar.buttonItems(
+      buttonItems: editableTextState.contextMenuButtonItems,
+      anchors: editableTextState.contextMenuAnchors,
+    );
+
 /// Builder function for embeddable objects in [FleatherEditor].
 typedef FleatherEmbedBuilder = Widget Function(
     BuildContext context, EmbedNode node);
@@ -190,6 +204,11 @@ class FleatherEditor extends StatefulWidget {
   /// Defaults to [defaultFleatherEmbedBuilder].
   final FleatherEmbedBuilder embedBuilder;
 
+  /// Builds the text selection toolbar when requested by the user.
+  ///
+  /// Defaults to [defaultContextMenuBuilder].
+  final FleatherContextMenuBuilder contextMenuBuilder;
+
   /// Delegate function responsible for showing menu with link actions on
   /// mobile platforms (iOS, Android).
   ///
@@ -227,6 +246,7 @@ class FleatherEditor extends StatefulWidget {
     this.keyboardAppearance,
     this.scrollPhysics,
     this.onLaunchUrl,
+    this.contextMenuBuilder = defaultContextMenuBuilder,
     this.embedBuilder = defaultFleatherEmbedBuilder,
     this.linkActionPickerDelegate = defaultLinkActionPickerDelegate,
   }) : super(key: key);
@@ -297,7 +317,6 @@ class _FleatherEditorState extends State<FleatherEditor>
 
     switch (theme.platform) {
       case TargetPlatform.iOS:
-      case TargetPlatform.macOS:
         final cupertinoTheme = CupertinoTheme.of(context);
         textSelectionControls = cupertinoTextSelectionControls;
         paintCursorAboveText = true;
@@ -310,11 +329,32 @@ class _FleatherEditorState extends State<FleatherEditor>
             iOSHorizontalOffset / MediaQuery.of(context).devicePixelRatio, 0);
         break;
 
+      case TargetPlatform.macOS:
+        final CupertinoThemeData cupertinoTheme = CupertinoTheme.of(context);
+        textSelectionControls = cupertinoDesktopTextSelectionControls;
+        paintCursorAboveText = true;
+        cursorOpacityAnimates = false;
+        cursorColor = selectionTheme.cursorColor ?? cupertinoTheme.primaryColor;
+        selectionColor = selectionTheme.selectionColor ??
+            cupertinoTheme.primaryColor.withOpacity(0.40);
+        cursorRadius ??= const Radius.circular(2.0);
+        cursorOffset = Offset(
+            iOSHorizontalOffset / MediaQuery.of(context).devicePixelRatio, 0);
+        break;
+
       case TargetPlatform.android:
       case TargetPlatform.fuchsia:
+        textSelectionControls = materialTextSelectionControls;
+        paintCursorAboveText = false;
+        cursorOpacityAnimates = false;
+        cursorColor = selectionTheme.cursorColor ?? theme.colorScheme.primary;
+        selectionColor = selectionTheme.selectionColor ??
+            theme.colorScheme.primary.withOpacity(0.40);
+        break;
+
       case TargetPlatform.linux:
       case TargetPlatform.windows:
-        textSelectionControls = materialTextSelectionControls;
+        textSelectionControls = desktopTextSelectionControls;
         paintCursorAboveText = false;
         cursorOpacityAnimates = false;
         cursorColor = selectionTheme.cursorColor ?? theme.colorScheme.primary;
@@ -516,15 +556,10 @@ class RawEditor extends StatefulWidget {
     this.onLaunchUrl,
     required this.selectionColor,
     this.scrollPhysics,
-    this.toolbarOptions = const ToolbarOptions(
-      copy: true,
-      cut: true,
-      paste: true,
-      selectAll: true,
-    ),
     required this.cursorStyle,
     this.showSelectionHandles = false,
     this.selectionControls,
+    this.contextMenuBuilder = defaultContextMenuBuilder,
     this.embedBuilder = defaultFleatherEmbedBuilder,
     this.linkActionPickerDelegate = defaultLinkActionPickerDelegate,
   })  : assert(scrollable || scrollController != null),
@@ -565,11 +600,10 @@ class RawEditor extends StatefulWidget {
   /// a link in the document.
   final ValueChanged<String?>? onLaunchUrl;
 
-  /// Configuration of toolbar options.
+  /// Builds the text selection toolbar when requested by the user.
   ///
-  /// By default, all options are enabled. If [readOnly] is true,
-  /// paste and cut will be disabled regardless.
-  final ToolbarOptions toolbarOptions;
+  /// Defaults to [defaultContextMenuBuilder].
+  final FleatherContextMenuBuilder contextMenuBuilder;
 
   /// Whether to show selection handles.
   ///
@@ -715,6 +749,8 @@ class RawEditor extends StatefulWidget {
 ///
 abstract class EditorState extends State<RawEditor>
     implements TextSelectionDelegate {
+  ClipboardStatusNotifier? get clipboardStatus;
+
   ScrollController get scrollController;
 
   RenderEditor get renderEditor;
@@ -730,6 +766,10 @@ abstract class EditorState extends State<RawEditor>
   void requestKeyboard();
 
   FocusNode get effectiveFocusNode;
+
+  TextSelectionToolbarAnchors get contextMenuAnchors;
+
+  List<ContextMenuButtonItem> get contextMenuButtonItems;
 }
 
 class RawEditorState extends EditorState
@@ -766,7 +806,8 @@ class RawEditorState extends EditorState
       _floatingCursorResetController;
   late AnimationController _floatingCursorResetController;
 
-  final ClipboardStatusNotifier? _clipboardStatus =
+  @override
+  final ClipboardStatusNotifier? clipboardStatus =
       kIsWeb ? null : ClipboardStatusNotifier();
   final LayerLink _toolbarLayerLink = LayerLink();
   final LayerLink _startHandleLayerLink = LayerLink();
@@ -945,7 +986,7 @@ class RawEditorState extends EditorState
   void initState() {
     super.initState();
 
-    _clipboardStatus?.addListener(_onChangedClipboardStatus);
+    clipboardStatus?.addListener(_onChangedClipboardStatus);
 
     widget.controller.addListener(_didChangeTextEditingValue);
 
@@ -1042,7 +1083,12 @@ class RawEditorState extends EditorState
       _selectionOverlay?.update(textEditingValue);
     }
 
-    _selectionOverlay?.handlesVisible = _shouldShowSelectionHandles();
+    if (_shouldShowSelectionHandles()) {
+      _selectionOverlay?.showHandles();
+    } else {
+      _selectionOverlay?.hideHandles();
+    }
+
     if (!shouldCreateInputConnection) {
       closeConnectionIfNeeded();
     } else {
@@ -1073,8 +1119,8 @@ class RawEditorState extends EditorState
     effectiveFocusNode.removeListener(_handleFocusChanged);
     _internalFocusNode?.dispose();
     _cursorController.dispose();
-    _clipboardStatus?.removeListener(_onChangedClipboardStatus);
-    _clipboardStatus?.dispose();
+    clipboardStatus?.removeListener(_onChangedClipboardStatus);
+    clipboardStatus?.dispose();
     _keyboardVisibilitySubscription?.cancel();
     super.dispose();
   }
@@ -1111,7 +1157,7 @@ class RawEditorState extends EditorState
     } else {
       if (_selectionOverlay == null) {
         _selectionOverlay = EditorTextSelectionOverlay(
-          clipboardStatus: _clipboardStatus,
+          clipboardStatus: clipboardStatus,
           context: context,
           value: textEditingValue,
           debugRequiredFor: widget,
@@ -1122,11 +1168,18 @@ class RawEditorState extends EditorState
           selectionControls: widget.selectionControls,
           selectionDelegate: this,
           dragStartBehavior: DragStartBehavior.start,
+          contextMenuBuilder: (context) =>
+              widget.contextMenuBuilder(context, this),
         );
       } else {
         _selectionOverlay!.update(textEditingValue);
       }
-      _selectionOverlay?.handlesVisible = _shouldShowSelectionHandles();
+
+      if (_shouldShowSelectionHandles()) {
+        _selectionOverlay?.showHandles();
+      } else {
+        _selectionOverlay?.hideHandles();
+      }
       _selectionOverlay!.showHandles();
     }
 
@@ -1237,6 +1290,29 @@ class RawEditorState extends EditorState
     final link =
         (linkNode as StyledNode).style.get(ParchmentAttribute.link)!.value!;
     return widget.linkActionPickerDelegate(context, link);
+  }
+
+  @override
+  void didChangeInputControl(
+      TextInputControl? oldControl, TextInputControl? newControl) {
+    if (_hasFocus && hasConnection) {
+      oldControl?.hide();
+      newControl?.show();
+    }
+  }
+
+  // On MacOS some actions are sent as selectors. We need to manually find the right Action and invoke it.
+  // Ref: https://github.com/flutter/flutter/blob/3.7.0/packages/flutter/lib/src/widgets/editable_text.dart#L3731
+  @override
+  void performSelector(String selectorName) {
+    final Intent? intent = intentForMacOSSelector(selectorName);
+
+    if (intent != null) {
+      final BuildContext? primaryContext = primaryFocus?.context;
+      if (primaryContext != null) {
+        Actions.invoke(primaryContext, intent);
+      }
+    }
   }
 
   @override
@@ -1548,6 +1624,44 @@ class RawEditorState extends EditorState
   @override
   void removeTextPlaceholder() {
     // TODO: implement removeTextPlaceholder
+  }
+
+  /// Returns the anchor points for the default context menu.
+  @override
+  TextSelectionToolbarAnchors get contextMenuAnchors {
+    final selection = textEditingValue.selection;
+    // Find the horizontal midpoint, just above the selected text.
+    final List<TextSelectionPoint> endpoints =
+        renderEditor.getEndpointsForSelection(selection);
+
+    final baseLineHeight = renderEditor.preferredLineHeight(selection.base);
+    final extentLineHeight = renderEditor.preferredLineHeight(selection.extent);
+    final smallestLineHeight = math.min(baseLineHeight, extentLineHeight);
+
+    return TextSelectionToolbarAnchors.fromSelection(
+        renderBox: renderEditor,
+        startGlyphHeight: smallestLineHeight,
+        endGlyphHeight: smallestLineHeight,
+        selectionEndpoints: endpoints);
+  }
+
+  /// Returns the [ContextMenuButtonItem]s representing the buttons in this
+  /// platform's default selection menu using [EditableText.getEditableButtonItems].
+  @override
+  List<ContextMenuButtonItem> get contextMenuButtonItems {
+    return EditableText.getEditableButtonItems(
+      clipboardStatus: clipboardStatus?.value,
+      onCopy: copyEnabled
+          ? () => copySelection(SelectionChangedCause.toolbar)
+          : null,
+      onCut:
+          cutEnabled ? () => cutSelection(SelectionChangedCause.toolbar) : null,
+      onPaste:
+          pasteEnabled ? () => pasteText(SelectionChangedCause.toolbar) : null,
+      onSelectAll: selectAllEnabled
+          ? () => selectAll(SelectionChangedCause.toolbar)
+          : null,
+    );
   }
 }
 

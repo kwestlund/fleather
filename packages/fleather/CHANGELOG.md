@@ -1,3 +1,18 @@
+## 1.6.0
+
+* Allow to undo/redo changes from toolbar
+* Remove use of deprecated ToolbarOptions
+* [Fix] Wrong context toolbar positioning
+* [Fix] Last separated character selection on iOS
+* [Fix] Hide selection handles when text changes
+
+## 1.5.0
+
+* [Fix] Ensure that text boxes are only the required size
+* [Fix] History not working when widget updated 
+* Support Flutter v3.7
+* Support `TextEditingDelta` handling
+
 ## 1.4.0
 
 * Keyboard appearance depends on default brightness

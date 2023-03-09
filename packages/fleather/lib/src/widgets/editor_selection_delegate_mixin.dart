@@ -81,20 +81,26 @@ mixin RawEditorStateSelectionDelegateMixin on EditorState
 
   @override
   void hideToolbar([bool hideHandles = true]) {
-    if (selectionOverlay?.toolbarIsVisible == true) {
+    if (hideHandles) {
+      selectionOverlay?.hide();
+    } else if (selectionOverlay?.toolbarIsVisible ?? false) {
       selectionOverlay?.hideToolbar();
     }
   }
 
   @override
-  bool get cutEnabled => widget.toolbarOptions.cut && !widget.readOnly;
+  bool get cutEnabled =>
+      !widget.readOnly && !textEditingValue.selection.isCollapsed;
 
   @override
-  bool get copyEnabled => widget.toolbarOptions.copy;
+  bool get copyEnabled => !textEditingValue.selection.isCollapsed;
 
   @override
-  bool get pasteEnabled => widget.toolbarOptions.paste && !widget.readOnly;
+  bool get pasteEnabled =>
+      !widget.readOnly &&
+      (clipboardStatus == null ||
+          clipboardStatus?.value == ClipboardStatus.pasteable);
 
   @override
-  bool get selectAllEnabled => widget.toolbarOptions.selectAll;
+  bool get selectAllEnabled => widget.enableInteractiveSelection;
 }
