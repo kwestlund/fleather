@@ -179,7 +179,8 @@ class FleatherThemeData {
         ),
       ),
       link: TextStyle(
-        color: themeData.colorScheme.primaryContainer,
+        /// KPW
+        color: themeData.colorScheme.primary,
         decoration: TextDecoration.underline,
       ),
       paragraph: TextBlockTheme(
