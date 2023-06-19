@@ -163,7 +163,8 @@ class FleatherThemeData {
       underline: const TextStyle(decoration: TextDecoration.underline),
       strikethrough: const TextStyle(decoration: TextDecoration.lineThrough),
       inlineCode: InlineCodeThemeData(
-        backgroundColor: Colors.grey.shade100,
+        /// KPW
+        backgroundColor: themeData.colorScheme.onPrimaryContainer,
         radius: const Radius.circular(3),
         style: inlineCodeStyle,
         heading1: inlineCodeStyle.copyWith(
