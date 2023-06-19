@@ -1322,9 +1322,6 @@ class RawEditorState extends EditorState
     Widget child = CompositedTransformTarget(
       link: _toolbarLayerLink,
       child: Semantics(
-//            onCopy: _semanticsOnCopy(controls),
-//            onCut: _semanticsOnCut(controls),
-//            onPaste: _semanticsOnPaste(controls),
         child: _Editor(
           key: _editorKey,
           document: widget.controller.document,
@@ -1343,11 +1340,11 @@ class RawEditorState extends EditorState
     );
 
     if (widget.scrollable) {
-      /// Since [SingleChildScrollView] does not implement
-      /// `computeDistanceToActualBaseline` it prevents the editor from
-      /// providing its baseline metrics. To address this issue we wrap
-      /// the scroll view with [BaselineProxy] which mimics the editor's
-      /// baseline.
+      // Since `SingleChildScrollView` does not implement
+      // `computeDistanceToActualBaseline` it prevents the editor from
+      // providing its baseline metrics. To address this issue we wrap
+      // the scroll view with [BaselineProxy] which mimics the editor's
+      // baseline.
       // This implies that the first line has no styles applied to it.
       final baselinePadding =
           EdgeInsets.only(top: _themeData.paragraph.spacing.top);
@@ -1474,6 +1471,10 @@ class RawEditorState extends EditorState
       return theme.heading2.spacing;
     } else if (style == ParchmentAttribute.heading.level3) {
       return theme.heading3.spacing;
+    } else if (style == ParchmentAttribute.heading.level4) {
+      return theme.heading4.spacing;
+    } else if (style == ParchmentAttribute.heading.level5) {
+      return theme.heading5.spacing;
     }
 
     return theme.paragraph.spacing;

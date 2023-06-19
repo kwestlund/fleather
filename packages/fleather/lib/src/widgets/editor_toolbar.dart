@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart';
-import 'package:parchment/parchment.dart';
+import 'dart:io';
 
-import 'controller.dart';
+import 'package:fleather/fleather.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 const double kToolbarHeight = 56.0;
 
@@ -202,7 +203,6 @@ class _LinkDialogState extends State<_LinkDialog> {
         onChanged: _linkChanged,
       ),
       actions: [
-        //TODO: Update to use TextButton
         TextButton(
           onPressed: _link.isNotEmpty ? _applyLink : null,
           child: const Text('Apply'),
@@ -350,53 +350,258 @@ Widget defaultToggleStyleButtonBuilder(
   );
 }
 
-/// Toolbar button which allows to apply heading style to a line of text in
-/// Fleather editor.
+/// Signature of callbacks that return a [Color] picked from a [BuildContext].
+typedef PickColor = Future<Color?> Function(BuildContext);
+
+/// Signature of callbacks the return a [Widget] from a [BuildContext]
+/// and a [Color].
+typedef ColorButtonBuilder = Widget Function(BuildContext, Color);
+
+/// Toolbar button which allows to apply background color style to a portion of text.
 ///
 /// Works as a dropdown menu button.
-// TODO: Add "dense" parameter which if set to true changes the button to use an icon instead of text (useful for mobile layouts)
-class SelectHeadingStyleButton extends StatefulWidget {
-  final FleatherController controller;
-
-  const SelectHeadingStyleButton({Key? key, required this.controller})
+class ColorButton extends StatefulWidget {
+  const ColorButton(
+      {Key? key,
+      required this.controller,
+      required this.attributeKey,
+      required this.defaultColor,
+      required this.builder,
+      this.pickColor})
       : super(key: key);
 
+  final FleatherController controller;
+  final ColorParchmentAttributeBuilder attributeKey;
+  final Color defaultColor;
+  final ColorButtonBuilder builder;
+  final PickColor? pickColor;
+
   @override
-  State<SelectHeadingStyleButton> createState() =>
-      _SelectHeadingStyleButtonState();
+  State<ColorButton> createState() => _ColorButtonState();
 }
 
-class _SelectHeadingStyleButtonState extends State<SelectHeadingStyleButton> {
-  ParchmentAttribute? _value;
+class _ColorButtonState extends State<ColorButton> {
+  static double buttonSize = 32;
+
+  late Color _value;
 
   ParchmentStyle get _selectionStyle => widget.controller.getSelectionStyle();
 
   void _didChangeEditingValue() {
     setState(() {
-      _value = _selectionStyle.get(ParchmentAttribute.heading) ??
+      _value = Color(_selectionStyle.get(widget.attributeKey)?.value ??
+          widget.defaultColor.value);
+    });
+  }
+
+  Future<Color?> _defaultPickColor(BuildContext context) async {
+    // kIsWeb important here as Platform.xxx will cause a crash en web
+    final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final maxWidth = isMobile ? 200.0 : 100.0;
+
+    final renderBox = context.findRenderObject() as RenderBox;
+    final offset = renderBox.localToGlobal(Offset.zero) + Offset(0, buttonSize);
+
+    final selector = Material(
+      elevation: 4.0,
+      color: Theme.of(context).canvasColor,
+      child: Container(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          padding: const EdgeInsets.all(8.0),
+          child: _ColorPalette(defaultColor: widget.defaultColor)),
+    );
+
+    return Navigator.of(context).push<Color>(
+      RawDialogRoute(
+        barrierColor: Colors.transparent,
+        pageBuilder: (context, _, __) {
+          return Stack(
+            children: [
+              Positioned(
+                key: const Key('color_palette'),
+                top: offset.dy,
+                left: offset.dx,
+                child: selector,
+              )
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _value = Color(_selectionStyle.get(widget.attributeKey)?.value ??
+        widget.defaultColor.value);
+    widget.controller.addListener(_didChangeEditingValue);
+  }
+
+  @override
+  void didUpdateWidget(covariant ColorButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_didChangeEditingValue);
+      widget.controller.addListener(_didChangeEditingValue);
+      _value = Color(_selectionStyle.get(widget.attributeKey)?.value ??
+          widget.defaultColor.value);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_didChangeEditingValue);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: BoxConstraints.tightFor(
+        width: buttonSize,
+        height: buttonSize,
+      ),
+      child: RawMaterialButton(
+        visualDensity: VisualDensity.compact,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
+        padding: EdgeInsets.zero,
+        elevation: 0,
+        hoverElevation: 1,
+        highlightElevation: 1,
+        onPressed: () async {
+          final selectedColor =
+              await (widget.pickColor ?? _defaultPickColor)(context);
+          widget.controller.formatSelection(widget.attributeKey
+              .withColor(selectedColor?.value ?? widget.defaultColor.value));
+        },
+        child: Builder(builder: (context) => widget.builder(context, _value)),
+      ),
+    );
+  }
+}
+
+class _ColorPalette extends StatelessWidget {
+  static const colors = [
+    Colors.indigo,
+    Colors.blue,
+    Colors.cyan,
+    Colors.teal,
+    Colors.green,
+    Colors.lime,
+    Colors.yellow,
+    Colors.amber,
+    Colors.orange,
+    Colors.red,
+    Colors.pink,
+    Colors.purple,
+    Colors.brown,
+    Colors.grey,
+    Colors.white
+  ];
+
+  const _ColorPalette({required this.defaultColor});
+
+  final Color defaultColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      runAlignment: WrapAlignment.spaceBetween,
+      alignment: WrapAlignment.start,
+      runSpacing: 4,
+      spacing: 4,
+      children: [defaultColor, ...colors]
+          .map((e) => _ColorPaletteElement(color: e))
+          .toList(),
+    );
+  }
+}
+
+class _ColorPaletteElement extends StatelessWidget {
+  const _ColorPaletteElement({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    // kIsWeb important here as Platform.xxx will cause a crash en web
+    final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final size = isMobile ? 32.0 : 16.0;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color,
+        border: color == Colors.transparent
+            ? Border.all(
+                color: Colors.black,
+                strokeAlign: BorderSide.strokeAlignInside,
+              )
+            : null,
+      ),
+      child: RawMaterialButton(onPressed: () => Navigator.pop(context, color)),
+    );
+  }
+}
+
+/// Toolbar button which allows to apply heading style to a line of text in
+/// Fleather editor.
+///
+/// Works as a dropdown menu button.
+// TODO: Add "dense" parameter which if set to true changes the button to use an icon instead of text (useful for mobile layouts)
+class SelectHeadingButton extends StatefulWidget {
+  const SelectHeadingButton({super.key, required this.controller});
+
+  final FleatherController controller;
+
+  @override
+  State<SelectHeadingButton> createState() => _SelectHeadingButtonState();
+}
+
+final _headingToText = {
+  ParchmentAttribute.heading.unset: 'Normal',
+  ParchmentAttribute.heading.level1: 'Heading 1',
+  ParchmentAttribute.heading.level2: 'Heading 2',
+  ParchmentAttribute.heading.level3: 'Heading 3',
+  ParchmentAttribute.heading.level4: 'Heading 4',
+  ParchmentAttribute.heading.level5: 'Heading 5',
+  ParchmentAttribute.heading.level6: 'Heading 6',
+};
+
+class _SelectHeadingButtonState extends State<SelectHeadingButton> {
+  static double buttonHeight = 32;
+
+  ParchmentAttribute<int>? current;
+
+  ParchmentStyle get selectionStyle => widget.controller.getSelectionStyle();
+
+  void _didChangeEditingValue() {
+    setState(() {
+      current = selectionStyle.get(ParchmentAttribute.heading) ??
           ParchmentAttribute.heading.unset;
     });
   }
 
-  void _selectAttribute(value) {
+  void _selectAttribute(ParchmentAttribute<int> value) {
     widget.controller.formatSelection(value);
   }
 
   @override
   void initState() {
     super.initState();
-    _value = _selectionStyle.get(ParchmentAttribute.heading) ??
+    current = selectionStyle.get(ParchmentAttribute.heading) ??
         ParchmentAttribute.heading.unset;
     widget.controller.addListener(_didChangeEditingValue);
   }
 
   @override
-  void didUpdateWidget(covariant SelectHeadingStyleButton oldWidget) {
+  void didUpdateWidget(covariant SelectHeadingButton oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_didChangeEditingValue);
       widget.controller.addListener(_didChangeEditingValue);
-      _value = _selectionStyle.get(ParchmentAttribute.heading) ??
+      current = selectionStyle.get(ParchmentAttribute.heading) ??
           ParchmentAttribute.heading.unset;
     }
   }
@@ -409,58 +614,112 @@ class _SelectHeadingStyleButtonState extends State<SelectHeadingStyleButton> {
 
   @override
   Widget build(BuildContext context) {
-    return _selectHeadingStyleButtonBuilder(context, _value, _selectAttribute);
+    return ConstrainedBox(
+      constraints: BoxConstraints.tightFor(height: buttonHeight),
+      child: RawMaterialButton(
+        onPressed: _selectHeading,
+        child: Text(_headingToText[current] ?? ''),
+      ),
+    );
+  }
+
+  Future<void> _selectHeading() async {
+    final renderBox = context.findRenderObject() as RenderBox;
+    final offset =
+        renderBox.localToGlobal(Offset.zero) + Offset(0, buttonHeight);
+    final themeData = FleatherTheme.of(context)!;
+
+    final selector = Material(
+      elevation: 4.0,
+      borderRadius: BorderRadius.circular(2),
+      color: Theme.of(context).canvasColor,
+      child: _HeadingList(theme: themeData),
+    );
+
+    final newValue = await Navigator.of(context).push<ParchmentAttribute<int>>(
+      RawDialogRoute(
+        barrierColor: Colors.transparent,
+        pageBuilder: (context, _, __) {
+          return Stack(
+            children: [
+              Positioned(
+                top: offset.dy,
+                left: offset.dx,
+                child: selector,
+              )
+            ],
+          );
+        },
+      ),
+    );
+
+    if (newValue != null) _selectAttribute(newValue);
   }
 }
 
-Widget _selectHeadingStyleButtonBuilder(BuildContext context,
-    ParchmentAttribute? value, ValueChanged<ParchmentAttribute?> onSelected) {
-  const style = TextStyle(fontSize: 12);
+class _HeadingList extends StatelessWidget {
+  final FleatherThemeData theme;
 
-  final valueToText = {
-    ParchmentAttribute.heading.unset: 'Normal text',
-    ParchmentAttribute.heading.level1: 'Heading 1',
-    ParchmentAttribute.heading.level2: 'Heading 2',
-    ParchmentAttribute.heading.level3: 'Heading 3',
-  };
+  const _HeadingList({required this.theme});
 
-  return FLDropdownButton<ParchmentAttribute?>(
-    highlightElevation: 0,
-    hoverElevation: 0,
-    height: 32,
-    initialValue: value,
-    items: [
-      PopupMenuItem(
-        value: ParchmentAttribute.heading.unset,
-        height: 32,
-        child:
-            Text(valueToText[ParchmentAttribute.heading.unset]!, style: style),
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 200),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: _headingToText.entries
+              .map((entry) => _listItem(theme, entry.key, entry.value))
+              .toList(),
+        ),
       ),
-      PopupMenuItem(
-        value: ParchmentAttribute.heading.level1,
-        height: 32,
-        child:
-            Text(valueToText[ParchmentAttribute.heading.level1]!, style: style),
+    );
+  }
+
+  Widget _listItem(
+      FleatherThemeData? theme, ParchmentAttribute<int> value, String text) {
+    final valueToStyle = {
+      ParchmentAttribute.heading.unset: theme?.paragraph.style,
+      ParchmentAttribute.heading.level1: theme?.heading1.style,
+      ParchmentAttribute.heading.level2: theme?.heading2.style,
+      ParchmentAttribute.heading.level3: theme?.heading3.style,
+      ParchmentAttribute.heading.level4: theme?.heading4.style,
+      ParchmentAttribute.heading.level5: theme?.heading5.style,
+      ParchmentAttribute.heading.level6: theme?.heading6.style,
+    };
+    return _HeadingListEntry(
+        value: value, text: text, style: valueToStyle[value]);
+  }
+}
+
+class _HeadingListEntry extends StatelessWidget {
+  final ParchmentAttribute<int> value;
+  final String text;
+  final TextStyle? style;
+
+  const _HeadingListEntry(
+      {required this.value, required this.text, required this.style});
+
+  @override
+  Widget build(BuildContext context) {
+    return RawMaterialButton(
+      key: Key('heading_entry${value.value ?? 0}'),
+      clipBehavior: Clip.antiAlias,
+      onPressed: () => Navigator.pop(context, value),
+      child: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+        child: Text(
+          text,
+          maxLines: 1,
+          style: style,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
-      PopupMenuItem(
-        value: ParchmentAttribute.heading.level2,
-        height: 32,
-        child:
-            Text(valueToText[ParchmentAttribute.heading.level2]!, style: style),
-      ),
-      PopupMenuItem(
-        value: ParchmentAttribute.heading.level3,
-        height: 32,
-        child:
-            Text(valueToText[ParchmentAttribute.heading.level3]!, style: style),
-      ),
-    ],
-    onSelected: onSelected,
-    child: Text(
-      valueToText[value as ParchmentAttribute<int>]!,
-      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-    ),
-  );
+    );
+  }
 }
 
 class IndentationButton extends StatefulWidget {
@@ -555,6 +814,8 @@ class FleatherToolbar extends StatefulWidget implements PreferredSizeWidget {
     bool hideItalicButton = false,
     bool hideUnderLineButton = false,
     bool hideStrikeThrough = false,
+    bool hideBackgroundColor = false,
+    bool hideForegroundColor = false,
     bool hideInlineCode = false,
     bool hideHeadingStyle = false,
     bool hideIndentation = false,
@@ -571,6 +832,51 @@ class FleatherToolbar extends StatefulWidget implements PreferredSizeWidget {
     List<Widget> trailing = const <Widget>[],
     bool hideAlignment = false,
   }) {
+    Widget backgroundColorBuilder(context, value) => Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.mode_edit_outline_outlined,
+              size: 16,
+            ),
+            Container(
+              width: 18,
+              height: 4,
+              decoration: BoxDecoration(
+                color: value,
+                border: value == Colors.transparent
+                    ? Border.all(
+                        color:
+                            Theme.of(context).iconTheme.color ?? Colors.black)
+                    : null,
+              ),
+            )
+          ],
+        );
+    Widget textColorBuilder(context, value) => Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.text_fields_sharp,
+              size: 16,
+            ),
+            Container(
+              width: 18,
+              height: 4,
+              decoration: BoxDecoration(
+                color: value,
+                border: value == Colors.transparent
+                    ? Border.all(
+                        color:
+                            Theme.of(context).iconTheme.color ?? Colors.black)
+                    : null,
+              ),
+            )
+          ],
+        );
     return FleatherToolbar(key: key, padding: padding, children: [
       ...leading,
       Visibility(
@@ -606,6 +912,25 @@ class FleatherToolbar extends StatefulWidget implements PreferredSizeWidget {
           attribute: ParchmentAttribute.strikethrough,
           icon: Icons.format_strikethrough,
           controller: controller,
+        ),
+      ),
+      const SizedBox(width: 1),
+      Visibility(
+        visible: !hideForegroundColor,
+        child: ColorButton(
+          controller: controller,
+          attributeKey: ParchmentAttribute.foregroundColor,
+          defaultColor: Colors.black,
+          builder: textColorBuilder,
+        ),
+      ),
+      Visibility(
+        visible: !hideBackgroundColor,
+        child: ColorButton(
+          controller: controller,
+          attributeKey: ParchmentAttribute.backgroundColor,
+          defaultColor: Colors.transparent,
+          builder: backgroundColorBuilder,
         ),
       ),
       const SizedBox(width: 1),
@@ -707,7 +1032,7 @@ class FleatherToolbar extends StatefulWidget implements PreferredSizeWidget {
 
       Visibility(
           visible: !hideHeadingStyle,
-          child: SelectHeadingStyleButton(controller: controller)),
+          child: SelectHeadingButton(controller: controller)),
       Visibility(
           visible: !hideHeadingStyle,
           child: VerticalDivider(
@@ -813,15 +1138,31 @@ class FleatherToolbar extends StatefulWidget implements PreferredSizeWidget {
 }
 
 class _FleatherToolbarState extends State<FleatherToolbar> {
+  late FleatherThemeData theme;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final parentTheme = FleatherTheme.of(context, nullOk: true);
+    final fallbackTheme = FleatherThemeData.fallback(context);
+    theme = (parentTheme != null)
+        ? fallbackTheme.merge(parentTheme)
+        : fallbackTheme;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 8),
-      constraints: BoxConstraints.tightFor(height: widget.preferredSize.height),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: widget.children,
+    return FleatherTheme(
+      data: theme,
+      child: Container(
+        padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 8),
+        constraints:
+            BoxConstraints.tightFor(height: widget.preferredSize.height),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: widget.children,
+          ),
         ),
       ),
     );
@@ -863,101 +1204,6 @@ class FLIconButton extends StatelessWidget {
         highlightElevation: hoverElevation,
         onPressed: onPressed,
         child: icon,
-      ),
-    );
-  }
-}
-
-class FLDropdownButton<T> extends StatefulWidget {
-  final double height;
-  final Color? fillColor;
-  final double hoverElevation;
-  final double highlightElevation;
-  final Widget child;
-  final T initialValue;
-  final List<PopupMenuEntry<T>> items;
-  final ValueChanged<T> onSelected;
-
-  const FLDropdownButton({
-    Key? key,
-    this.height = 40,
-    this.fillColor,
-    this.hoverElevation = 1,
-    this.highlightElevation = 1,
-    required this.child,
-    required this.initialValue,
-    required this.items,
-    required this.onSelected,
-  }) : super(key: key);
-
-  @override
-  State<FLDropdownButton<T>> createState() => _FLDropdownButtonState<T>();
-}
-
-class _FLDropdownButtonState<T> extends State<FLDropdownButton<T>> {
-  @override
-  Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: BoxConstraints.tightFor(height: widget.height),
-      child: RawMaterialButton(
-        visualDensity: VisualDensity.compact,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
-        padding: EdgeInsets.zero,
-        fillColor: widget.fillColor,
-        elevation: 0,
-        hoverElevation: widget.hoverElevation,
-        highlightElevation: widget.hoverElevation,
-        onPressed: _showMenu,
-        child: _buildContent(context),
-      ),
-    );
-  }
-
-  void _showMenu() {
-    final popupMenuTheme = PopupMenuTheme.of(context);
-    final button = context.findRenderObject() as RenderBox;
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    final position = RelativeRect.fromRect(
-      Rect.fromPoints(
-        button.localToGlobal(Offset.zero, ancestor: overlay),
-        button.localToGlobal(button.size.bottomLeft(Offset.zero),
-            ancestor: overlay),
-      ),
-      Offset.zero & overlay.size,
-    );
-    showMenu<T>(
-      context: context,
-      elevation: 4,
-      // widget.elevation ?? popupMenuTheme.elevation,
-      initialValue: widget.initialValue,
-      items: widget.items,
-      position: position,
-      shape: popupMenuTheme.shape,
-      // widget.shape ?? popupMenuTheme.shape,
-      color: popupMenuTheme.color, // widget.color ?? popupMenuTheme.color,
-      // captureInheritedThemes: widget.captureInheritedThemes,
-    ).then((T? newValue) {
-      if (!mounted) return null;
-      if (newValue == null) {
-        // if (widget.onCanceled != null) widget.onCanceled();
-        return null;
-      }
-      widget.onSelected(newValue);
-    });
-  }
-
-  Widget _buildContent(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints.tightFor(width: 110),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8.0),
-        child: Row(
-          children: [
-            widget.child,
-            Expanded(child: Container()),
-            const Icon(Icons.arrow_drop_down, size: 14)
-          ],
-        ),
       ),
     );
   }

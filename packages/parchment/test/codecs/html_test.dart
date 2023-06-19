@@ -35,6 +35,32 @@ void main() {
             codec.encode(doc), 'Something <strong>in the way</strong> mmmm...');
       });
 
+      test('background color', () {
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Something '},
+          {
+            'insert': 'in the way',
+            'attributes': {'bg': 0xFFFF0000}
+          },
+          {'insert': ' mmmm...\n'}
+        ]);
+        expect(codec.encode(doc),
+            'Something <span style="background-color: rgba(255,0,0,1.0)">in the way</span> mmmm...');
+      });
+
+      test('text color', () {
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Something '},
+          {
+            'insert': 'in the way',
+            'attributes': {'fg': 0xFFFF0000}
+          },
+          {'insert': ' mmmm...\n'}
+        ]);
+        expect(codec.encode(doc),
+            'Something <span style="color: rgba(255,0,0,1.0)">in the way</span> mmmm...');
+      });
+
       test('italic + code + underlined + strikethrough text', () {
         final doc = ParchmentDocument.fromJson([
           {
@@ -202,6 +228,42 @@ void main() {
         ]);
 
         expect(codec.encode(doc), '<h3>Hello World!</h3>');
+      });
+
+      test('4', () {
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Hello World!'},
+          {
+            'insert': '\n',
+            'attributes': {'heading': 4}
+          }
+        ]);
+
+        expect(codec.encode(doc), '<h4>Hello World!</h4>');
+      });
+
+      test('5', () {
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Hello World!'},
+          {
+            'insert': '\n',
+            'attributes': {'heading': 5}
+          }
+        ]);
+
+        expect(codec.encode(doc), '<h5>Hello World!</h5>');
+      });
+
+      test('6', () {
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Hello World!'},
+          {
+            'insert': '\n',
+            'attributes': {'heading': 6}
+          }
+        ]);
+
+        expect(codec.encode(doc), '<h6>Hello World!</h6>');
       });
     });
 
@@ -1049,6 +1111,34 @@ void main() {
         expect(codec.decode(html).toDelta(), doc.toDelta());
       });
 
+      test('Background color', () {
+        final htmlRGBA =
+            '<span style="background-color: rgba(255,0,0,1)">Hello</span> world!';
+        final doc = ParchmentDocument.fromJson([
+          {
+            'insert': 'Hello',
+            'attributes': {'bg': 0xffff0000}
+          },
+          {'insert': ' world!\n'}
+        ]);
+
+        expect(codec.decode(htmlRGBA).toDelta(), doc.toDelta());
+      });
+
+      test('Foreground color', () {
+        final htmlRGBA =
+            '<span style="color: rgba(255,0,0,1)">Hello</span> world!';
+        final doc = ParchmentDocument.fromJson([
+          {
+            'insert': 'Hello',
+            'attributes': {'fg': 0xffff0000}
+          },
+          {'insert': ' world!\n'}
+        ]);
+
+        expect(codec.decode(htmlRGBA).toDelta(), doc.toDelta());
+      });
+
       test('Bold paragraph', () {
         final html = '<strong>Hello World!</strong>';
         final doc = ParchmentDocument.fromJson([
@@ -1170,6 +1260,45 @@ void main() {
           {
             'insert': '\n',
             'attributes': {'heading': 3}
+          }
+        ]);
+
+        expect(codec.decode(html).toDelta(), doc.toDelta());
+      });
+
+      test('4', () {
+        final html = '<h4>Hello World!</h4>';
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Hello World!'},
+          {
+            'insert': '\n',
+            'attributes': {'heading': 4}
+          }
+        ]);
+
+        expect(codec.decode(html).toDelta(), doc.toDelta());
+      });
+
+      test('5', () {
+        final html = '<h5>Hello World!</h5>';
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Hello World!'},
+          {
+            'insert': '\n',
+            'attributes': {'heading': 5}
+          }
+        ]);
+
+        expect(codec.decode(html).toDelta(), doc.toDelta());
+      });
+
+      test('6', () {
+        final html = '<h6>Hello World!</h6>';
+        final doc = ParchmentDocument.fromJson([
+          {'insert': 'Hello World!'},
+          {
+            'insert': '\n',
+            'attributes': {'heading': 6}
           }
         ]);
 
@@ -1613,7 +1742,7 @@ final doc = [
   {'insert': '\nFleather is an '},
   {
     'insert': 'early preview',
-    'attributes': {'b': true}
+    'attributes': {'b': true, 'fg': 0xFFFF0000}
   },
   {'insert': ' open source library.\nDocumentation'},
   {
@@ -1688,7 +1817,7 @@ final doc = [
 final delta = Delta.fromJson(doc);
 final htmlDoc = '<h1>Fleather</h1>'
     '<p><em>Soft and gentle rich text editing for Flutter applications.</em></p>'
-    '<p>Fleather is an <strong>early preview</strong> open source library.</p>'
+    '<p>Fleather is an <strong><span style="color: rgba(255,0,0,1.0)">early preview</span></strong> open source library.</p>'
     '<h3>Documentation</h3>'
     '<ul>'
     '<li>Quick Start</li>'

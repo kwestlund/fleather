@@ -388,11 +388,7 @@ class RenderEditableTextLine extends RenderEditableBox {
   ///
   /// Implies [markNeedsLayout].
   @protected
-  void markNeedsTextLayout() {
-//    _textLayoutLastMaxWidth = null;
-//    _textLayoutLastMinWidth = null;
-    markNeedsLayout();
-  }
+  void markNeedsTextLayout() => markNeedsLayout();
 
   // End RenderEditableBox implementation
 
@@ -441,11 +437,7 @@ class RenderEditableTextLine extends RenderEditableBox {
 
   set cursorController(CursorController value) {
     if (_cursorController == value) return;
-    // TODO: unsubscribe from old controller updates
-//    if (attached) _showCursor.removeListener(_markNeedsPaintIfContainsCursor);
     _cursorController = value;
-    // TODO: subscribe to new controller updates
-//    if (attached) _showCursor.addListener(_markNeedsPaintIfContainsCursor);
     markNeedsLayout();
   }
 
@@ -575,12 +567,9 @@ class RenderEditableTextLine extends RenderEditableBox {
     _resolvePadding();
     final horizontalPadding = _resolvedPadding!.left + _resolvedPadding!.right;
     final verticalPadding = _resolvedPadding!.top + _resolvedPadding!.bottom;
-    final leadingWidth = leading == null
-        ? 0
-        : leading!.getMinIntrinsicWidth(height - verticalPadding);
-    final bodyWidth = body == null
-        ? 0
-        : body!.getMinIntrinsicWidth(math.max(0.0, height - verticalPadding));
+    final effectiveHeight = math.max(0.0, height - verticalPadding);
+    final leadingWidth = leading?.getMinIntrinsicWidth(effectiveHeight) ?? 0;
+    final bodyWidth = body?.getMinIntrinsicWidth(effectiveHeight) ?? 0;
     return horizontalPadding + leadingWidth + bodyWidth;
   }
 
@@ -589,12 +578,9 @@ class RenderEditableTextLine extends RenderEditableBox {
     _resolvePadding();
     final horizontalPadding = _resolvedPadding!.left + _resolvedPadding!.right;
     final verticalPadding = _resolvedPadding!.top + _resolvedPadding!.bottom;
-    final leadingWidth = leading == null
-        ? 0
-        : leading!.getMaxIntrinsicWidth(height - verticalPadding);
-    final bodyWidth = body == null
-        ? 0
-        : body!.getMaxIntrinsicWidth(math.max(0.0, height - verticalPadding));
+    final effectiveHeight = math.max(0.0, height - verticalPadding);
+    final leadingWidth = leading?.getMaxIntrinsicWidth(effectiveHeight) ?? 0;
+    final bodyWidth = body?.getMaxIntrinsicWidth(effectiveHeight) ?? 0;
     return horizontalPadding + leadingWidth + bodyWidth;
   }
 
@@ -698,34 +684,14 @@ class RenderEditableTextLine extends RenderEditableBox {
       final parentData = body!.parentData as BoxParentData;
       final effectiveOffset = offset + parentData.offset;
 
-      if (_inlineCodeTheme.backgroundColor != null) {
-        for (var item in node.children) {
-          if (item is! TextNode) continue;
-          if (!item.style.containsSame(ParchmentAttribute.inlineCode)) continue;
-          final textRange = TextSelection(
-              baseOffset: item.offset, extentOffset: item.offset + item.length);
-          final rects = body!.getBoxesForSelection(textRange);
-          final paint = Paint()..color = _inlineCodeTheme.backgroundColor!;
-          for (final box in rects) {
-            final rect = box.toRect().translate(0, 1).shift(effectiveOffset);
-            if (_inlineCodeTheme.radius == null) {
-              final paintRect = Rect.fromLTRB(
-                  rect.left - 2, rect.top, rect.right + 2, rect.bottom);
-              context.canvas.drawRect(paintRect, paint);
-            } else {
-              final paintRect = RRect.fromLTRBR(rect.left - 2, rect.top,
-                  rect.right + 2, rect.bottom, _inlineCodeTheme.radius!);
-              context.canvas.drawRRect(paintRect, paint);
-            }
-          }
-        }
+      for (var item in node.children) {
+        if (item is! TextNode) continue;
+        _paintTextBackground(context, item, effectiveOffset);
       }
 
       if (selectionEnabled && containsSelection) {
         final local = localSelection(node, selection);
-        _selectionRects ??= body!.getBoxesForSelection(
-          local, /*, boxHeightStyle: _selectionHeightStyle, boxWidthStyle: _selectionWidthStyle*/
-        );
+        _selectionRects ??= body!.getBoxesForSelection(local);
         _paintSelection(context, effectiveOffset);
       }
 
@@ -747,10 +713,45 @@ class RenderEditableTextLine extends RenderEditableBox {
     }
   }
 
+  // Paint line background if item is a TextNode and is inline code or has
+  // a none transparent background color
+  void _paintTextBackground(
+      PaintingContext context, TextNode node, Offset effectiveOffset) {
+    final isInlineCode = node.style.containsSame(ParchmentAttribute.inlineCode);
+    final background = node.style.get(ParchmentAttribute.backgroundColor);
+    if (!isInlineCode && background == null) return;
+
+    final Color color;
+    if (isInlineCode) {
+      color = _inlineCodeTheme.backgroundColor ?? Colors.transparent;
+    } else {
+      color = Color(background?.value ?? Colors.transparent.value);
+    }
+    if (color == Colors.transparent) return;
+
+    final textRange = TextSelection(
+        baseOffset: node.offset, extentOffset: node.offset + node.length);
+    final rects = body!.getBoxesForSelection(textRange);
+    final paint = Paint()..color = color;
+
+    for (final box in rects) {
+      Rect rect = box.toRect().shift(effectiveOffset);
+      if (isInlineCode) {
+        rect = Rect.fromLTRB(
+            rect.left - 2, rect.top + 1, rect.right + 2, rect.bottom + 1);
+        if (_inlineCodeTheme.radius == null) {
+          context.canvas.drawRect(rect, paint);
+        } else {
+          context.canvas.drawRRect(
+              RRect.fromRectAndRadius(rect, _inlineCodeTheme.radius!), paint);
+        }
+      } else {
+        context.canvas.drawRect(rect, paint);
+      }
+    }
+  }
+
   void _paintSelection(PaintingContext context, Offset effectiveOffset) {
-    // assert(_textLayoutLastMaxWidth == constraints.maxWidth &&
-    //     _textLayoutLastMinWidth == constraints.minWidth,
-    // 'Last width ($_textLayoutLastMinWidth, $_textLayoutLastMaxWidth) not the same as max width constraint (${constraints.minWidth}, ${constraints.maxWidth}).');
     assert(_selectionRects != null);
     final paint = Paint()..color = _selectionColor;
     for (final box in _selectionRects!) {

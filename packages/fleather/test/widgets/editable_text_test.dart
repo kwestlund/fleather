@@ -1,6 +1,7 @@
 import 'package:fleather/fleather.dart';
 import 'package:fleather/src/widgets/checkbox.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quill_delta/quill_delta.dart';
 
@@ -47,6 +48,39 @@ void main() {
       expect(editor.focusNode.hasFocus, isFalse);
     });
 
+    testWidgets(
+        'Selection is correct after merging two blocks by deleting'
+        'new line character between them', (tester) async {
+      final document = ParchmentDocument.fromJson([
+        {'insert': 'Test'},
+        {
+          'insert': '\n',
+          'attributes': {'block': 'code'}
+        },
+        {'insert': 'Test'},
+        {
+          'insert': '\n',
+          'attributes': {'block': 'quote'}
+        },
+      ]);
+      final editor =
+          EditorSandBox(tester: tester, document: document, autofocus: true);
+      await editor.pump();
+      // Tapping of editor ensure selectionOverlay is set in EditorState
+      await editor.tap();
+      await editor.updateSelection(base: 5, extent: 5);
+      getInputClient().updateEditingValueWithDeltas([
+        TextEditingDeltaDeletion(
+          oldText: document.toPlainText(),
+          deletedRange: const TextRange(start: 4, end: 5),
+          selection: const TextSelection.collapsed(offset: 4),
+          composing: TextRange.empty,
+        )
+      ]);
+      await editor.pump();
+      await tester.pumpAndSettle(throttleDuration);
+    });
+
     group('lists', () {
       testWidgets('check list', (tester) async {
         final delta = Delta()
@@ -56,6 +90,11 @@ void main() {
             tester: tester, document: ParchmentDocument.fromDelta(delta));
         await editor.pump();
         expect(find.byType(FleatherCheckbox), findsOneWidget);
+
+        await tester.tap(find.byType(FleatherCheckbox));
+        await tester.pumpAndSettle(throttleDuration);
+        expect(editor.document.toDelta().last,
+            Operation.insert('\n', {'block': 'cl', 'checked': true}));
       });
 
       testWidgets('bullet list', (tester) async {
@@ -77,6 +116,76 @@ void main() {
         await editor.pump();
         expect(find.text('1.', findRichText: true), findsOneWidget);
       });
+    });
+
+    testWidgets('headings', (tester) async {
+      TextStyle levelToStyle(FleatherThemeData themeData, int level) {
+        switch (level) {
+          case 1:
+            return themeData.heading1.style;
+          case 2:
+            return themeData.heading2.style;
+          case 3:
+            return themeData.heading3.style;
+          case 4:
+            return themeData.heading4.style;
+          case 5:
+            return themeData.heading5.style;
+          case 6:
+            return themeData.heading6.style;
+          default:
+            throw ArgumentError('Level must be lower or equal than 6');
+        }
+      }
+
+      Future<void> runHeading(WidgetTester tester, int level,
+          {bool inBlock = false}) async {
+        // heading in block to account for spacing
+        final delta = Delta()
+          ..insert('a heading')
+          ..insert('\n', {'heading': level, if (inBlock) 'block': 'quote'})
+          ..insert('a paragraph')
+          ..insert('\n', {if (inBlock) 'block': 'quote'});
+        final editor = EditorSandBox(
+            tester: tester, document: ParchmentDocument.fromDelta(delta));
+        await editor.pump();
+        final context = tester.element(find.byType(TextLine).first);
+        final line = tester.widget<RichText>(find.byType(RichText).first);
+        final theme = FleatherTheme.of(context)!;
+        final expStyle = inBlock
+            ? levelToStyle(theme, level).merge(theme.quote.style)
+            : levelToStyle(theme, level);
+        expect((line.text as TextSpan).style, expStyle,
+            reason: 'Failed on heading $level ${inBlock ? 'in block' : ''}');
+      }
+
+      await runHeading(tester, 1, inBlock: true);
+      await runHeading(tester, 2, inBlock: true);
+      await runHeading(tester, 3, inBlock: true);
+      await runHeading(tester, 4, inBlock: true);
+      await runHeading(tester, 5, inBlock: true);
+      await runHeading(tester, 6, inBlock: true);
+
+      await runHeading(tester, 1);
+      await runHeading(tester, 2);
+      await runHeading(tester, 3);
+      await runHeading(tester, 4);
+      await runHeading(tester, 5);
+      await runHeading(tester, 6);
+    });
+  });
+
+  group('Inline format', () {
+    testWidgets('Text color', (tester) async {
+      final delta = Delta()
+        ..insert('colore text', {'fg': 4278237952})
+        ..insert('\n');
+      final editor = EditorSandBox(
+          tester: tester, document: ParchmentDocument.fromDelta(delta));
+      await editor.pump();
+      final widget = tester.widget<RichText>(find.byType(RichText));
+      expect((widget.text as TextSpan).children?[0].style?.color?.value,
+          4278237952);
     });
   });
 }
