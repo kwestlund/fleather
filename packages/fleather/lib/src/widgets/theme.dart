@@ -153,7 +153,7 @@ class FleatherThemeData {
 
     final inlineCodeStyle = TextStyle(
       fontSize: 14,
-      color: themeData.colorScheme.primaryContainer.withOpacity(0.8),
+      color: themeData.colorScheme.primaryContainer,
       fontFamily: fontFamily,
     );
 
@@ -164,7 +164,8 @@ class FleatherThemeData {
       strikethrough: const TextStyle(decoration: TextDecoration.lineThrough),
       inlineCode: InlineCodeThemeData(
         /// KPW
-        backgroundColor: themeData.colorScheme.onPrimaryContainer,
+        backgroundColor:
+            themeData.colorScheme.onPrimaryContainer.withOpacity(.6),
         radius: const Radius.circular(3),
         style: inlineCodeStyle,
         heading1: inlineCodeStyle.copyWith(
