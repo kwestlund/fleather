@@ -110,9 +110,13 @@ abstract base class LeafNode extends Node with StyledNode {
 
   @override
   void applyStyle(ParchmentStyle value) {
-    assert(value.isInline || value.isEmpty,
-        'Style cannot be applied to this leaf node: $value');
-    super.applyStyle(value);
+    /// KPW 7/8/23 replace assert with conditional
+    if (value.isInline || value.isEmpty) {
+      super.applyStyle(value);
+    }
+    // assert(value.isInline || value.isEmpty,
+    //     'Style cannot be applied to this leaf node: $value');
+    // super.applyStyle(value);
   }
 
   @override

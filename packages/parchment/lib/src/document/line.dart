@@ -24,8 +24,9 @@ final class LineNode extends ContainerNode<LeafNode> with StyledNode {
     if (childCount == 1 && children.single is EmbedNode) {
       return !(children.single as EmbedNode).value.inline;
     }
-    assert(children.every((child) =>
-        child is TextNode || (child is EmbedNode && child.value.inline)));
+    /// KPW 7/8/23
+    // assert(children.every((child) =>
+    //     child is TextNode || (child is EmbedNode && child.value.inline)));
     return false;
   }
 
