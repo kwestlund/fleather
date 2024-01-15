@@ -1,3 +1,15 @@
+## 1.13.0
+* Upgrade dependencies
+
+## 1.12.0
+* Introduce AutoFormats to handle automatic text formatting and make Heuristics only responsible for validity of document
+* [Fix] preserve line style on new line
+
+## 1.11.0
+
+* Add support for strike-through in Markdown codec
+* [Fix] HTML encoder for tangled inline tags
+
 ## 1.9.0
 
 * Migrated to Dart 3

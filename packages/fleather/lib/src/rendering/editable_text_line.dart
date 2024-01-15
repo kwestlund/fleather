@@ -19,7 +19,6 @@ enum TextLineSlot { leading, body }
 class RenderEditableTextLine extends RenderEditableBox {
   /// Creates new editable paragraph render box.
   RenderEditableTextLine({
-    // RenderEditableMetricsProvider child,
     required LineNode node,
     required EdgeInsetsGeometry padding,
     required TextDirection textDirection,
@@ -35,8 +34,6 @@ class RenderEditableTextLine extends RenderEditableBox {
     ui.BoxWidthStyle selectionWidthStyle = ui.BoxWidthStyle.tight,
     EdgeInsets floatingCursorAddedMargin =
         const EdgeInsets.fromLTRB(4, 4, 4, 5),
-//    TextRange promptRectRange,
-//    Color promptRectColor,
   })  : assert(padding.isNonNegative),
         _textDirection = textDirection,
         _padding = padding,
@@ -52,6 +49,7 @@ class RenderEditableTextLine extends RenderEditableBox {
   //
 
   InlineCodeThemeData _inlineCodeTheme;
+
   set inlineCodeTheme(InlineCodeThemeData theme) {
     if (_inlineCodeTheme == theme) return;
     _inlineCodeTheme = theme;
@@ -281,6 +279,14 @@ class RenderEditableTextLine extends RenderEditableBox {
     return body!.getPositionForOffset(shiftedOffset);
   }
 
+  // Computes the line box height for the position.
+  double _getLineHeightForPosition(TextPosition position) {
+    final lineBoundary = getLineBoundary(position);
+    final boxes = body!.getBoxesForSelection(TextSelection(
+        baseOffset: lineBoundary.start, extentOffset: lineBoundary.end));
+    return boxes.fold(0, (v, e) => math.max(v, e.toRect().height));
+  }
+
   @override
   TextPosition? getPositionAbove(TextPosition position) {
     assert(position.offset < node.length);
@@ -290,7 +296,8 @@ class RenderEditableTextLine extends RenderEditableBox {
     // the caret so the middle of the line above is a half line above that
     // point.
     final caretOffset = getOffsetForCaret(position);
-    final dy = -0.5 * preferredLineHeight(position);
+    final dy = -_getLineHeightForPosition(position) +
+        0.5 * preferredLineHeight(position);
     final abovePositionOffset = caretOffset.translate(0, dy);
     if (!body!.size.contains(abovePositionOffset - parentData.offset)) {
       // We're outside of the body so there is no text above to check.
@@ -332,6 +339,12 @@ class RenderEditableTextLine extends RenderEditableBox {
     final lineDy = caret.translate(0.0, 0.5 * preferredLineHeight(position)).dy;
     final boxes = getBoxesForSelection(
         TextSelection(baseOffset: 0, extentOffset: node.length - 1));
+
+    // If document is empty, boxes will be empty
+    // TextPainter (RenderParagraphProxy -> RenderParagraph) returns no boxes
+    // when it has not text
+    if (boxes.isEmpty) return const TextRange.collapsed(0);
+
     final lineBoxes = boxes
         .where((element) => element.top < lineDy && element.bottom > lineDy)
         .toList(growable: false);

@@ -17,12 +17,13 @@ import 'package:flutter/widgets.dart';
 class FleatherSingleChildScrollView extends StatelessWidget {
   /// Creates a box in which a single widget can be scrolled.
   const FleatherSingleChildScrollView({
-    Key? key,
+    super.key,
     this.physics,
     required this.controller,
     required this.viewportBuilder,
     this.restorationId,
-  }) : super(key: key);
+    this.scrollableKey,
+  });
 
   /// An object that can be used to control the position to which this scroll
   /// view is scrolled.
@@ -51,6 +52,8 @@ class FleatherSingleChildScrollView extends StatelessWidget {
 
   final ViewportBuilder viewportBuilder;
 
+  final Key? scrollableKey;
+
   AxisDirection _getDirection(BuildContext context) {
     return getAxisDirectionFromAxisReverseAndDirectionality(
         context, Axis.vertical, false);
@@ -61,6 +64,7 @@ class FleatherSingleChildScrollView extends StatelessWidget {
     final axisDirection = _getDirection(context);
     final scrollController = controller;
     final scrollable = Scrollable(
+      key: scrollableKey,
       dragStartBehavior: DragStartBehavior.start,
       axisDirection: axisDirection,
       controller: scrollController,
@@ -79,10 +83,9 @@ class FleatherSingleChildScrollView extends StatelessWidget {
 
 class _SingleChildViewport extends SingleChildRenderObjectWidget {
   const _SingleChildViewport({
-    Key? key,
     required this.offset,
-    Widget? child,
-  }) : super(key: key, child: child);
+    super.child,
+  });
 
   final ViewportOffset offset;
 
@@ -305,7 +308,8 @@ class _RenderSingleChildViewport extends RenderBox
 
   @override
   RevealedOffset getOffsetToReveal(RenderObject target, double alignment,
-      {Rect? rect}) {
+      {Rect? rect, Axis? axis}) {
+    // axis is ignored as we only support SingleDimensionViewport
     rect ??= target.paintBounds;
     if (target is! RenderBox) {
       return RevealedOffset(offset: offset.pixels, rect: rect);

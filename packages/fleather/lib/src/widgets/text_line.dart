@@ -28,14 +28,14 @@ class TextLine extends StatefulWidget {
   final LinkActionPicker linkActionPicker;
 
   const TextLine({
-    Key? key,
+    super.key,
     required this.node,
     required this.readOnly,
     required this.controller,
     required this.embedBuilder,
     required this.onLaunchUrl,
     required this.linkActionPicker,
-  }) : super(key: key);
+  });
 
   @override
   State<TextLine> createState() => _TextLineState();
@@ -136,7 +136,7 @@ class _TextLineState extends State<TextLine> {
         text: text,
         textAlign: textAlign,
         strutStyle: strutStyle,
-        textScaleFactor: MediaQuery.textScaleFactorOf(context),
+        textScaler: MediaQuery.textScalerOf(context),
       ),
     );
   }

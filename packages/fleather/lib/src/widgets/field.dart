@@ -133,6 +133,18 @@ class FleatherField extends StatefulWidget {
 
   final Widget? toolbar;
 
+  /// Configuration that details how spell check should be performed.
+  ///
+  /// Specifies the [SpellCheckService] used to spell check text input and the
+  /// [TextStyle] used to style text with misspelled words.
+  ///
+  /// If the [SpellCheckService] is left null, spell check is disabled by
+  /// default unless the [DefaultSpellCheckService] is supported, in which case
+  /// it is used. It is currently supported only on Android and iOS.
+  ///
+  /// If this configuration is left null, then spell check is disabled by default.
+  final SpellCheckConfiguration? spellCheckConfiguration;
+
   /// Builder function for embeddable objects.
   ///
   /// Defaults to [defaultFleatherEmbedBuilder].
@@ -146,7 +158,7 @@ class FleatherField extends StatefulWidget {
   final GlobalKey<EditorState>? editorKey;
 
   const FleatherField({
-    Key? key,
+    super.key,
     required this.controller,
     this.editorKey,
     this.focusNode,
@@ -167,8 +179,9 @@ class FleatherField extends StatefulWidget {
     this.decoration,
     this.toolbar,
     this.contextMenuBuilder = defaultContextMenuBuilder,
+    this.spellCheckConfiguration,
     this.embedBuilder = defaultFleatherEmbedBuilder,
-  }) : super(key: key);
+  });
 
   @override
   State<FleatherField> createState() => _FleatherFieldState();
@@ -233,6 +246,7 @@ class _FleatherFieldState extends State<FleatherField> {
       scrollPhysics: widget.scrollPhysics,
       onLaunchUrl: widget.onLaunchUrl,
       embedBuilder: widget.embedBuilder,
+      spellCheckConfiguration: widget.spellCheckConfiguration,
       contextMenuBuilder: widget.contextMenuBuilder,
     );
 

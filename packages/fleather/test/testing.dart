@@ -6,49 +6,53 @@ import 'package:fleather/fleather.dart';
 import 'package:fleather/src/widgets/editor_input_client_mixin.dart';
 import 'package:fleather/src/widgets/text_selection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quill_delta/quill_delta.dart';
 
 var delta = Delta()..insert('This House Is A Circus\n');
 
 class EditorSandBox {
-  final WidgetTester tester;
-  final FocusNode focusNode;
-  final ParchmentDocument document;
-  final FleatherController controller;
-  final Widget widget;
-
   factory EditorSandBox({
     required WidgetTester tester,
     FocusNode? focusNode,
     ParchmentDocument? document,
     FleatherThemeData? fleatherTheme,
-    ThemeData? theme,
     bool autofocus = false,
+    FakeSpellCheckService? spellCheckService,
+    FleatherEmbedBuilder embedBuilder = defaultFleatherEmbedBuilder,
   }) {
     focusNode ??= FocusNode();
     document ??= ParchmentDocument.fromDelta(delta);
-    var controller = FleatherController(document);
+    var controller = FleatherController(document: document);
 
     Widget widget = _FleatherSandbox(
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
+      spellCheckService: spellCheckService,
+      embedBuilder: embedBuilder,
     );
 
     if (fleatherTheme != null) {
       widget = FleatherTheme(data: fleatherTheme, child: widget);
     }
-    widget = MaterialApp(
-      home: widget,
-      theme: theme,
-    );
+    widget = MaterialApp(home: widget);
 
-    return EditorSandBox._(tester, focusNode, document, controller, widget);
+    return EditorSandBox._(tester, focusNode, document, controller, widget,
+        spellCheckService: spellCheckService);
   }
 
   EditorSandBox._(
-      this.tester, this.focusNode, this.document, this.controller, this.widget);
+      this.tester, this.focusNode, this.document, this.controller, this.widget,
+      {this.spellCheckService});
+
+  final WidgetTester tester;
+  final FocusNode focusNode;
+  final ParchmentDocument document;
+  final FleatherController controller;
+  final Widget widget;
+  final FakeSpellCheckService? spellCheckService;
 
   TextSelection get selection => controller.selection;
 
@@ -113,7 +117,7 @@ class EditorSandBox {
     return button;
   }
 
-  Finder findSelectionHandles() => find.byType(TextSelectionHandleOverlay);
+  Finder findSelectionHandles() => find.byType(SelectionHandleOverlay);
 
   Future<void> enterText(TextEditingValue text) async {
     return TestAsyncUtils.guard<void>(() async {
@@ -134,14 +138,18 @@ class EditorSandBox {
 
 class _FleatherSandbox extends StatefulWidget {
   const _FleatherSandbox({
-    Key? key,
     required this.controller,
     required this.focusNode,
     this.autofocus = false,
-  }) : super(key: key);
+    this.spellCheckService,
+    this.embedBuilder = defaultFleatherEmbedBuilder,
+  });
+
   final FleatherController controller;
   final FocusNode focusNode;
   final bool autofocus;
+  final FakeSpellCheckService? spellCheckService;
+  final FleatherEmbedBuilder embedBuilder;
 
   @override
   _FleatherSandboxState createState() => _FleatherSandboxState();
@@ -154,10 +162,16 @@ class _FleatherSandboxState extends State<_FleatherSandbox> {
   Widget build(BuildContext context) {
     return Material(
       child: FleatherField(
+        embedBuilder: widget.embedBuilder,
         controller: widget.controller,
         focusNode: widget.focusNode,
         readOnly: !_enabled,
         autofocus: widget.autofocus,
+        spellCheckConfiguration: widget.spellCheckService != null
+            ? SpellCheckConfiguration(
+                spellCheckService: widget.spellCheckService,
+              )
+            : null,
       ),
     );
   }
@@ -171,11 +185,10 @@ class _FleatherSandboxState extends State<_FleatherSandbox> {
 
 class TestUpdateWidget extends StatefulWidget {
   const TestUpdateWidget(
-      {Key? key,
+      {super.key,
       required this.focusNodeAfterChange,
       this.testField = false,
-      this.document})
-      : super(key: key);
+      this.document});
 
   final FocusNode focusNodeAfterChange;
   final bool testField;
@@ -199,11 +212,11 @@ class TestUpdateWidgetState extends State<TestUpdateWidget> {
           ),
           widget.testField
               ? FleatherField(
-                  controller: FleatherController(widget.document),
+                  controller: FleatherController(document: widget.document),
                   focusNode: focusNode,
                 )
               : FleatherEditor(
-                  controller: FleatherController(widget.document),
+                  controller: FleatherController(document: widget.document),
                   focusNode: focusNode,
                 ),
         ],
@@ -213,3 +226,13 @@ class TestUpdateWidgetState extends State<TestUpdateWidget> {
 RawEditorStateTextInputClientMixin getInputClient() =>
     (find.byType(RawEditor).evaluate().single as StatefulElement).state
         as RawEditorStateTextInputClientMixin;
+
+class FakeSpellCheckService implements SpellCheckService {
+  Future<List<SuggestionSpan>?> Function(Locale local, String text)? stub;
+
+  @override
+  Future<List<SuggestionSpan>?> fetchSpellCheckSuggestions(
+      Locale locale, String text) async {
+    return await (stub ?? (() => Future.value(null)))(locale, text);
+  }
+}

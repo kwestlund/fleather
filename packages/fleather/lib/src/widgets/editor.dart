@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:math';
 
+import 'package:fleather/src/services/spell_check_suggestions_toolbar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -37,11 +39,29 @@ typedef FleatherContextMenuBuilder = Widget Function(
 
 /// Default implementation of a widget builder function for context menu.
 Widget defaultContextMenuBuilder(
-        BuildContext context, EditorState editableTextState) =>
+        BuildContext context, EditorState editorState) =>
     AdaptiveTextSelectionToolbar.buttonItems(
-      buttonItems: editableTextState.contextMenuButtonItems,
-      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: editorState.contextMenuButtonItems,
+      anchors: editorState.contextMenuAnchors,
     );
+
+Widget defaultSpellCheckMenuBuilder(
+    BuildContext context, EditorState editorState) {
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.iOS:
+      return FleatherCupertinoSpellCheckSuggestionsToolbar.editor(
+          editorState: editorState);
+    case TargetPlatform.android:
+      return FleatherSpellCheckSuggestionsToolbar.editor(
+          editorState: editorState);
+    case TargetPlatform.macOS:
+    case TargetPlatform.linux:
+    case TargetPlatform.windows:
+    case TargetPlatform.fuchsia:
+    default:
+      throw UnsupportedError('Only iOS and Android support spell check');
+  }
+}
 
 /// Builder function for embeddable objects in [FleatherEditor].
 typedef FleatherEmbedBuilder = Widget Function(
@@ -204,6 +224,18 @@ class FleatherEditor extends StatefulWidget {
   /// Defaults to [defaultFleatherEmbedBuilder].
   final FleatherEmbedBuilder embedBuilder;
 
+  /// Configuration that details how spell check should be performed.
+  ///
+  /// Specifies the [SpellCheckService] used to spell check text input and the
+  /// [TextStyle] used to style text with misspelled words.
+  ///
+  /// If the [SpellCheckService] is left null, spell check is disabled by
+  /// default unless the [DefaultSpellCheckService] is supported, in which case
+  /// it is used. It is currently supported only on Android and iOS.
+  ///
+  /// If this configuration is left null, then spell check is disabled by default.
+  final SpellCheckConfiguration? spellCheckConfiguration;
+
   /// Builds the text selection toolbar when requested by the user.
   ///
   /// Defaults to [defaultContextMenuBuilder].
@@ -227,7 +259,7 @@ class FleatherEditor extends StatefulWidget {
   final GlobalKey<EditorState>? editorKey;
 
   const FleatherEditor({
-    Key? key,
+    super.key,
     required this.controller,
     this.editorKey,
     this.focusNode,
@@ -246,10 +278,11 @@ class FleatherEditor extends StatefulWidget {
     this.keyboardAppearance,
     this.scrollPhysics,
     this.onLaunchUrl,
+    this.spellCheckConfiguration,
     this.contextMenuBuilder = defaultContextMenuBuilder,
     this.embedBuilder = defaultFleatherEmbedBuilder,
     this.linkActionPickerDelegate = defaultLinkActionPickerDelegate,
-  }) : super(key: key);
+  });
 
   @override
   State<FleatherEditor> createState() => _FleatherEditorState();
@@ -262,9 +295,8 @@ class _FleatherEditorState extends State<FleatherEditor>
   @override
   GlobalKey<EditorState> get editableTextKey => widget.editorKey ?? _editorKey!;
 
-  // TODO: Add support for forcePress on iOS.
   @override
-  bool get forcePressEnabled => false;
+  bool get forcePressEnabled => true;
 
   @override
   bool get selectionEnabled => widget.enableInteractiveSelection;
@@ -383,6 +415,7 @@ class _FleatherEditorState extends State<FleatherEditor>
       scrollPhysics: widget.scrollPhysics,
       onLaunchUrl: widget.onLaunchUrl,
       embedBuilder: widget.embedBuilder,
+      spellCheckConfiguration: widget.spellCheckConfiguration,
       linkActionPickerDelegate: widget.linkActionPickerDelegate,
       // encapsulated fields below
       cursorStyle: CursorStyle(
@@ -428,106 +461,28 @@ class _FleatherEditorSelectionGestureDetectorBuilder
   void onForcePressStart(ForcePressDetails details) {
     super.onForcePressStart(details);
     if (delegate.selectionEnabled && shouldShowSelectionToolbar) {
-      editor!.showToolbar();
+      editor.showToolbar();
     }
   }
 
   @override
-  void onForcePressEnd(ForcePressDetails details) {
-    // Not required.
-  }
-
-  @override
-  void onSingleLongTapMoveUpdate(LongPressMoveUpdateDetails details) {
-    if (delegate.selectionEnabled) {
-      switch (Theme.of(_state.context).platform) {
-        case TargetPlatform.iOS:
-        case TargetPlatform.macOS:
-          renderEditor!.selectPositionAt(
-            from: details.globalPosition,
-            cause: SelectionChangedCause.longPress,
-          );
-          break;
-        case TargetPlatform.android:
-        case TargetPlatform.fuchsia:
-        case TargetPlatform.linux:
-        case TargetPlatform.windows:
-          renderEditor!.selectWordsInRange(
-            from: details.globalPosition - details.offsetFromOrigin,
-            to: details.globalPosition,
-            cause: SelectionChangedCause.longPress,
-          );
-          break;
-      }
-    }
-  }
-
-  bool isShiftClick(PointerDeviceKind deviceKind) {
-    final pressed = RawKeyboard.instance.keysPressed;
-    return deviceKind == PointerDeviceKind.mouse &&
-        (pressed.contains(LogicalKeyboardKey.shiftLeft) ||
-            pressed.contains(LogicalKeyboardKey.shiftRight));
-  }
-
-  @override
-  void onSingleTapUp(TapUpDetails details) {
-    editor!.hideToolbar();
-
-    if (delegate.selectionEnabled) {
-      switch (Theme.of(_state.context).platform) {
-        case TargetPlatform.iOS:
-        case TargetPlatform.macOS:
-          switch (details.kind) {
-            case PointerDeviceKind.mouse:
-            case PointerDeviceKind.stylus:
-            case PointerDeviceKind.invertedStylus:
-              // Precise devices should place the cursor at a precise position.
-              // If `Shift` key is pressed then extend current selection instead.
-              if (isShiftClick(details.kind)) {
-                renderEditor!.extendSelection(details.globalPosition,
-                    cause: SelectionChangedCause.tap);
-              } else {
-                renderEditor!.selectPosition(cause: SelectionChangedCause.tap);
-              }
-              break;
-            case PointerDeviceKind.touch:
-            case PointerDeviceKind.trackpad:
-            case PointerDeviceKind.unknown:
-              // On macOS/iOS/iPadOS a touch tap places the cursor at the edge
-              // of the word.
-              renderEditor!.selectWordEdge(cause: SelectionChangedCause.tap);
-              break;
-          }
-          break;
-        case TargetPlatform.android:
-        case TargetPlatform.fuchsia:
-        case TargetPlatform.linux:
-        case TargetPlatform.windows:
-          renderEditor!.selectPosition(cause: SelectionChangedCause.tap);
-          break;
-      }
-    }
+  void onSingleTapUp(TapDragUpDetails details) {
+    super.onSingleTapUp(details);
     _state._requestKeyboard();
-    // if (_state.widget.onTap != null)
-    //   _state.widget.onTap();
   }
 
   @override
   void onSingleLongTapStart(LongPressStartDetails details) {
+    super.onSingleLongTapStart(details);
     if (delegate.selectionEnabled) {
       switch (Theme.of(_state.context).platform) {
         case TargetPlatform.iOS:
         case TargetPlatform.macOS:
-          renderEditor!.selectPositionAt(
-            from: details.globalPosition,
-            cause: SelectionChangedCause.longPress,
-          );
           break;
         case TargetPlatform.android:
         case TargetPlatform.fuchsia:
         case TargetPlatform.linux:
         case TargetPlatform.windows:
-          renderEditor!.selectWord(cause: SelectionChangedCause.longPress);
           Feedback.forLongPress(_state.context);
           break;
       }
@@ -537,7 +492,7 @@ class _FleatherEditorSelectionGestureDetectorBuilder
 
 class RawEditor extends StatefulWidget {
   const RawEditor({
-    Key? key,
+    super.key,
     required this.controller,
     this.focusNode,
     this.scrollController,
@@ -560,6 +515,7 @@ class RawEditor extends StatefulWidget {
     this.showSelectionHandles = false,
     this.selectionControls,
     this.contextMenuBuilder = defaultContextMenuBuilder,
+    this.spellCheckConfiguration,
     this.embedBuilder = defaultFleatherEmbedBuilder,
     this.linkActionPickerDelegate = defaultLinkActionPickerDelegate,
   })  : assert(scrollable || scrollController != null),
@@ -572,8 +528,7 @@ class RawEditor extends StatefulWidget {
           'minHeight can\'t be greater than maxHeight',
         ),
         // keyboardType = keyboardType ?? TextInputType.multiline,
-        showCursor = showCursor ?? !readOnly,
-        super(key: key);
+        showCursor = showCursor ?? !readOnly;
 
   /// Controls the document being edited.
   final FleatherController controller;
@@ -604,6 +559,18 @@ class RawEditor extends StatefulWidget {
   ///
   /// Defaults to [defaultContextMenuBuilder].
   final FleatherContextMenuBuilder contextMenuBuilder;
+
+  /// Configuration that details how spell check should be performed.
+  ///
+  /// Specifies the [SpellCheckService] used to spell check text input and the
+  /// [TextStyle] used to style text with misspelled words.
+  ///
+  /// If the [SpellCheckService] is left null, spell check is disabled by
+  /// default unless the [DefaultSpellCheckService] is supported, in which case
+  /// it is used. It is currently supported only on Android and iOS.
+  ///
+  /// If this configuration is left null, then spell check is disabled by default.
+  final SpellCheckConfiguration? spellCheckConfiguration;
 
   /// Whether to show selection handles.
   ///
@@ -749,6 +716,15 @@ class RawEditor extends StatefulWidget {
 ///
 abstract class EditorState extends State<RawEditor>
     implements TextSelectionDelegate {
+  @override
+  bool lookUpEnabled = false;
+
+  @override
+  bool shareEnabled = false;
+
+  @override
+  bool searchWebEnabled = false;
+
   ClipboardStatusNotifier? get clipboardStatus;
 
   ScrollController get scrollController;
@@ -757,21 +733,65 @@ abstract class EditorState extends State<RawEditor>
 
   EditorTextSelectionOverlay? get selectionOverlay;
 
+  FleatherThemeData get themeData;
+
   /// Controls the floating cursor animation when it is released.
   /// The floating cursor is animated to merge with the regular cursor.
   AnimationController get floatingCursorResetController;
 
-  bool showToolbar();
-
-  void requestKeyboard();
+  /// Whether or not spell check is enabled.
+  ///
+  /// Spell check is enabled when a [SpellCheckConfiguration] has been specified
+  /// for the widget.
+  bool get spellCheckEnabled;
 
   FocusNode get effectiveFocusNode;
 
   TextSelectionToolbarAnchors get contextMenuAnchors;
 
   List<ContextMenuButtonItem> get contextMenuButtonItems;
+
+  /// Shows toolbar
+  ///
+  /// if [createIfNull] is `true`, create the [EditorTextSelectionOverlay]
+  /// if the latter is null
+  bool showToolbar({createIfNull = false});
+
+  /// Shows toolbar with spell check suggestions of misspelled words that are
+  /// available for click-and-replace.
+  bool showSpellCheckSuggestionsToolbar();
+
+  /// Finds specified [SuggestionSpan] that matches the provided index using
+  /// binary search.
+  ///
+  /// See also:
+  ///
+  ///  * [SpellCheckSuggestionsToolbar], the Material style spell check
+  ///    suggestions toolbar that uses this method to render the correct
+  ///    suggestions in the toolbar for a misspelled word.
+  SuggestionSpan? findSuggestionSpanAtCursorIndex(int cursorIndex);
+
+  Future<void> performSpellCheck(final String text);
+
+  void toggleToolbar([bool hideHandles = true]);
+
+  /// Shows the magnifier at the position given by `positionToShow`,
+  /// if there is no magnifier visible.
+  ///
+  /// Updates the magnifier to the position given by `positionToShow`,
+  /// if there is a magnifier visible.
+  ///
+  /// Does nothing if a magnifier couldn't be shown, such as when the selection
+  /// overlay does not currently exist.
+  void showMagnifier(Offset positionToShow);
+
+  /// Hides the magnifier if it is visible.
+  void hideMagnifier();
+
+  void requestKeyboard();
 }
 
+// TODO: apply styling and color to spelling suggestion
 class RawEditorState extends EditorState
     with
         AutomaticKeepAliveClientMixin<RawEditor>,
@@ -781,9 +801,13 @@ class RawEditorState extends EditorState
         RawEditorStateSelectionDelegateMixin
     implements TextSelectionDelegate {
   final GlobalKey _editorKey = GlobalKey();
+  final GlobalKey _scrollableKey = GlobalKey();
 
   // Theme
   late FleatherThemeData _themeData;
+
+  @override
+  FleatherThemeData get themeData => _themeData;
 
   // Cursors
   late CursorController _cursorController;
@@ -861,21 +885,223 @@ class RawEditorState extends EditorState
   /// Returns `false` if a toolbar couldn't be shown, such as when the toolbar
   /// is already shown, or when no text selection currently exists.
   @override
-  bool showToolbar() {
+  bool showToolbar({createIfNull = false}) {
     // Web is using native dom elements to enable clipboard functionality of the
     // toolbar: copy, paste, select, cut. It might also provide additional
     // functionality depending on the browser (such as translate). Due to this
     // we should not show a Flutter toolbar for the editable text elements.
-    if (kIsWeb) {
+    if (kIsWeb && BrowserContextMenu.enabled) {
       return false;
     }
 
-    if (_selectionOverlay == null || _selectionOverlay!.toolbarIsVisible) {
+    if (_selectionOverlay == null) {
+      if (createIfNull) {
+        _selectionOverlay = _createSelectionOverlay();
+      } else {
+        return false;
+      }
+    } else if (_selectionOverlay!.toolbarIsVisible) {
       return false;
     }
 
     _selectionOverlay!.showToolbar();
     return true;
+  }
+
+  @override
+  void toggleToolbar([bool hideHandles = true]) {
+    final selectionOverlay = _selectionOverlay ??= _createSelectionOverlay();
+
+    if (selectionOverlay.toolbarIsVisible) {
+      hideToolbar(hideHandles);
+    } else {
+      showToolbar();
+    }
+  }
+
+  @override
+  void showMagnifier(Offset positionToShow) {
+    if (_selectionOverlay == null) {
+      return;
+    }
+
+    if (_selectionOverlay!.magnifierIsVisible) {
+      _selectionOverlay!.updateMagnifier(positionToShow);
+    } else {
+      _selectionOverlay!.showMagnifier(positionToShow);
+    }
+  }
+
+  @override
+  void hideMagnifier() {
+    if (_selectionOverlay == null) {
+      return;
+    }
+
+    if (_selectionOverlay!.magnifierIsVisible) {
+      _selectionOverlay!.hideMagnifier();
+    }
+  }
+
+  @override
+  bool showSpellCheckSuggestionsToolbar() {
+    // Spell check suggestions toolbars are intended to be shown on non-web
+    // platforms. Additionally, the Cupertino style toolbar can't be drawn on
+    // the web with the HTML renderer due to
+    // https://github.com/flutter/flutter/issues/123560.
+    final bool platformNotSupported = kIsWeb && BrowserContextMenu.enabled;
+    if (!spellCheckEnabled ||
+        platformNotSupported ||
+        widget.readOnly ||
+        _selectionOverlay == null ||
+        !_spellCheckResultsReceived ||
+        findSuggestionSpanAtCursorIndex(
+                textEditingValue.selection.extentOffset) ==
+            null) {
+      // Only attempt to show the spell check suggestions toolbar if there
+      // is a toolbar specified and spell check suggestions available to show.
+      return false;
+    }
+
+    _selectionOverlay!.showSpellCheckSuggestionsToolbar(
+      (BuildContext context) => defaultSpellCheckMenuBuilder(context, this),
+    );
+    return true;
+  }
+
+  late SpellCheckConfiguration _spellCheckConfiguration;
+
+  /// Configuration that determines how spell check will be performed.
+  ///
+  /// If possible, this configuration will contain a default for the
+  /// [SpellCheckService] if it is not otherwise specified.
+  ///
+  /// See also:
+  ///  * [DefaultSpellCheckService], the spell check service used by default.
+  @visibleForTesting
+  SpellCheckConfiguration get spellCheckConfiguration =>
+      _spellCheckConfiguration;
+
+  @override
+  bool get spellCheckEnabled => _spellCheckConfiguration.spellCheckEnabled;
+
+  /// The most up-to-date spell check results for text input.
+  ///
+  /// These results will be updated via calls to spell check through a
+  /// [SpellCheckService] and used by this widget to build the [TextSpan] tree
+  /// for text input and menus for replacement suggestions of misspelled words.
+  SpellCheckResults? spellCheckResults;
+
+  bool get _spellCheckResultsReceived =>
+      spellCheckEnabled &&
+      spellCheckResults != null &&
+      spellCheckResults!.suggestionSpans.isNotEmpty;
+
+  /// Infers the [SpellCheckConfiguration] used to perform spell check.
+  ///
+  /// If spell check is enabled, this will try to infer a value for
+  /// the [SpellCheckService] if left unspecified.
+  static SpellCheckConfiguration _inferSpellCheckConfiguration(
+      SpellCheckConfiguration? configuration) {
+    final SpellCheckService? spellCheckService =
+        configuration?.spellCheckService;
+    final bool spellCheckAutomaticallyDisabled = configuration == null ||
+        configuration == const SpellCheckConfiguration.disabled();
+    final bool spellCheckServiceIsConfigured = spellCheckService != null ||
+        spellCheckService == null &&
+            WidgetsBinding
+                .instance.platformDispatcher.nativeSpellCheckServiceDefined;
+    if (spellCheckAutomaticallyDisabled || !spellCheckServiceIsConfigured) {
+      // Only enable spell check if a non-disabled configuration is provided
+      // and if that configuration does not specify a spell check service,
+      // a native spell checker must be supported.
+      assert(() {
+        if (!spellCheckAutomaticallyDisabled &&
+            !spellCheckServiceIsConfigured) {
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: FlutterError(
+                'Spell check was enabled with spellCheckConfiguration, but the '
+                'current platform does not have a supported spell check '
+                'service, and none was provided. Consider disabling spell '
+                'check for this platform or passing a SpellCheckConfiguration '
+                'with a specified spell check service.',
+              ),
+              library: 'widget library',
+              stack: StackTrace.current,
+            ),
+          );
+        }
+        return true;
+      }());
+      return const SpellCheckConfiguration.disabled();
+    }
+
+    return configuration.copyWith(
+        spellCheckService: spellCheckService ?? DefaultSpellCheckService());
+  }
+
+  @override
+  Future<void> performSpellCheck(final String text) async {
+    try {
+      final Locale? localeForSpellChecking =
+          Localizations.maybeLocaleOf(context);
+
+      assert(
+        localeForSpellChecking != null,
+        'Locale must be specified in widget or Localization widget must be in scope',
+      );
+
+      final List<SuggestionSpan>? suggestions = await _spellCheckConfiguration
+          .spellCheckService
+          ?.fetchSpellCheckSuggestions(localeForSpellChecking!, text);
+
+      if (suggestions == null) {
+        // The request to fetch spell check suggestions was canceled due to ongoing request.
+        return;
+      }
+
+      spellCheckResults = SpellCheckResults(text, suggestions);
+      // TODO : renderEditable.text = buildTextSpan();
+    } catch (exception, stack) {
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: exception,
+        stack: stack,
+        library: 'widgets',
+        context: ErrorDescription('while performing spell check'),
+      ));
+    }
+  }
+
+  @override
+  SuggestionSpan? findSuggestionSpanAtCursorIndex(int cursorIndex) {
+    if (!_spellCheckResultsReceived ||
+        spellCheckResults!.suggestionSpans.last.range.end < cursorIndex) {
+      // No spell check results have been received or the cursor index is out
+      // of range that suggestionSpans covers.
+      return null;
+    }
+
+    final List<SuggestionSpan> suggestionSpans =
+        spellCheckResults!.suggestionSpans;
+    int leftIndex = 0;
+    int rightIndex = suggestionSpans.length - 1;
+    int midIndex = 0;
+
+    while (leftIndex <= rightIndex) {
+      midIndex = ((leftIndex + rightIndex) / 2).floor();
+      final int currentSpanStart = suggestionSpans[midIndex].range.start;
+      final int currentSpanEnd = suggestionSpans[midIndex].range.end;
+
+      if (cursorIndex <= currentSpanEnd && cursorIndex >= currentSpanStart) {
+        return suggestionSpans[midIndex];
+      } else if (cursorIndex <= currentSpanStart) {
+        rightIndex = midIndex - 1;
+      } else {
+        leftIndex = midIndex + 1;
+      }
+    }
+    return null;
   }
 
   /// Copy current selection to [Clipboard].
@@ -971,8 +1197,28 @@ class RawEditorState extends EditorState
       ),
       cause,
     );
+
     if (cause == SelectionChangedCause.toolbar) {
-      bringIntoView(textEditingValue.selection.extent);
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+        case TargetPlatform.iOS:
+        case TargetPlatform.fuchsia:
+          break;
+        case TargetPlatform.macOS:
+        case TargetPlatform.linux:
+        case TargetPlatform.windows:
+          hideToolbar();
+      }
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+        case TargetPlatform.fuchsia:
+        case TargetPlatform.linux:
+        case TargetPlatform.windows:
+          bringIntoView(textEditingValue.selection.extent);
+        case TargetPlatform.macOS:
+        case TargetPlatform.iOS:
+          break;
+      }
     }
   }
 
@@ -987,6 +1233,9 @@ class RawEditorState extends EditorState
     super.initState();
 
     clipboardStatus?.addListener(_onChangedClipboardStatus);
+
+    _spellCheckConfiguration =
+        _inferSpellCheckConfiguration(widget.spellCheckConfiguration);
 
     widget.controller.addListener(_didChangeTextEditingValue);
 
@@ -1042,16 +1291,14 @@ class RawEditorState extends EditorState
       FocusScope.of(context).autofocus(effectiveFocusNode);
       _didAutoFocus = true;
     }
-  }
-
-  bool _shouldShowSelectionHandles() {
-    return widget.showSelectionHandles &&
-        !widget.controller.selection.isCollapsed;
+    performSpellCheck(widget.controller.plainTextEditingValue.text);
   }
 
   @override
   void didUpdateWidget(RawEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    performSpellCheck(widget.controller.plainTextEditingValue.text);
 
     _cursorController.showCursor.value = widget.showCursor;
     _cursorController.style = widget.cursorStyle;
@@ -1081,13 +1328,10 @@ class RawEditorState extends EditorState
 
     if (widget.controller.selection != oldWidget.controller.selection) {
       _selectionOverlay?.update(textEditingValue);
+      _selectionOverlay?.hideToolbar();
     }
 
-    if (_shouldShowSelectionHandles()) {
-      _selectionOverlay?.showHandles();
-    } else {
-      _selectionOverlay?.hideHandles();
-    }
+    _selectionOverlay?.handlesVisible = widget.showSelectionHandles;
 
     if (!shouldCreateInputConnection) {
       closeConnectionIfNeeded();
@@ -1096,17 +1340,6 @@ class RawEditorState extends EditorState
         openConnectionIfNeeded();
       }
     }
-
-//    if (widget.style != oldWidget.style) {
-//      final TextStyle style = widget.style;
-//      _textInputConnection?.setStyle(
-//        fontFamily: style.fontFamily,
-//        fontSize: style.fontSize,
-//        fontWeight: style.fontWeight,
-//        textDirection: _textDirection,
-//        textAlign: widget.textAlign,
-//      );
-//    }
   }
 
   @override
@@ -1139,47 +1372,33 @@ class RawEditorState extends EditorState
       _cursorController.startCursorTimer();
     }
     _updateOrDisposeSelectionOverlayIfNeeded();
-
     setState(() {
-      /* We use widget.controller.value in build(). */
+      /*
+       * We use widget.controller.value in build().
+       * We need to run this before updating SelectionOverlay to ensure
+       * that renderers are in line with the document.
+       */
     });
-    _adjacentLineAction.stopCurrentVerticalRunIfSelectionChanges();
+    _verticalSelectionUpdateAction.stopCurrentVerticalRunIfSelectionChanges();
   }
 
   void _handleSelectionChanged(
       TextSelection selection, SelectionChangedCause cause) {
     final oldSelection = widget.controller.selection;
     widget.controller.updateSelection(selection, source: ChangeSource.local);
+    updateTextInputConnectionStyle(selection.base);
 
     if (widget.selectionControls == null) {
       _selectionOverlay?.dispose();
       _selectionOverlay = null;
     } else {
       if (_selectionOverlay == null) {
-        _selectionOverlay = EditorTextSelectionOverlay(
-          clipboardStatus: clipboardStatus,
-          context: context,
-          value: textEditingValue,
-          debugRequiredFor: widget,
-          toolbarLayerLink: _toolbarLayerLink,
-          startHandleLayerLink: _startHandleLayerLink,
-          endHandleLayerLink: _endHandleLayerLink,
-          renderObject: renderEditor,
-          selectionControls: widget.selectionControls,
-          selectionDelegate: this,
-          dragStartBehavior: DragStartBehavior.start,
-          contextMenuBuilder: (context) =>
-              widget.contextMenuBuilder(context, this),
-        );
+        _selectionOverlay = _createSelectionOverlay();
       } else {
         _selectionOverlay!.update(textEditingValue);
       }
-
-      if (_shouldShowSelectionHandles()) {
-        _selectionOverlay?.showHandles();
-      } else {
-        _selectionOverlay?.hideHandles();
-      }
+      _selectionOverlay!.handlesVisible = widget.showSelectionHandles;
+      _selectionOverlay!.showHandles();
     }
 
     // This will show the keyboard for all selection changes on the
@@ -1195,6 +1414,24 @@ class RawEditorState extends EditorState
         bringIntoView(selection.extent);
       }
     }
+  }
+
+  EditorTextSelectionOverlay _createSelectionOverlay() {
+    return EditorTextSelectionOverlay(
+      clipboardStatus: clipboardStatus,
+      context: context,
+      value: textEditingValue,
+      debugRequiredFor: widget,
+      toolbarLayerLink: _toolbarLayerLink,
+      startHandleLayerLink: _startHandleLayerLink,
+      endHandleLayerLink: _endHandleLayerLink,
+      renderObject: renderEditor,
+      selectionControls: widget.selectionControls,
+      selectionDelegate: this,
+      dragStartBehavior: DragStartBehavior.start,
+      contextMenuBuilder: (context) => widget.contextMenuBuilder(context, this),
+      magnifierConfiguration: TextMagnifier.adaptiveMagnifierConfiguration,
+    );
   }
 
   void _handleFocusChanged() {
@@ -1352,6 +1589,7 @@ class RawEditorState extends EditorState
         textStyle: _themeData.paragraph.style,
         padding: baselinePadding,
         child: FleatherSingleChildScrollView(
+          scrollableKey: _scrollableKey,
           controller: _scrollController,
           physics: widget.scrollPhysics,
           viewportBuilder: (_, offset) => CompositedTransformTarget(
@@ -1539,8 +1777,50 @@ class RawEditorState extends EditorState
             boundary, _CollapsedSelectionBoundary(atomicTextBoundary, false));
   }
 
+  _TextBoundary _paragraphBoundary(DirectionalTextEditingIntent intent) =>
+      _ParagraphBoundary(textEditingValue);
+
   _TextBoundary _documentBoundary(DirectionalTextEditingIntent intent) =>
       _DocumentBoundary(textEditingValue);
+
+  // Scrolls either to the beginning or end of the document depending on the
+  // intent's `forward` parameter.
+  void _scrollToDocumentBoundary(ScrollToDocumentBoundaryIntent intent) {
+    if (intent.forward) {
+      bringIntoView(TextPosition(offset: textEditingValue.text.length));
+    } else {
+      bringIntoView(const TextPosition(offset: 0));
+    }
+  }
+
+  /// Handles [ScrollIntent] by scrolling the [Scrollable] inside of
+  /// [EditableText].
+  void _scroll(ScrollIntent intent) {
+    if (intent.type != ScrollIncrementType.page) {
+      return;
+    }
+
+    final ScrollPosition position = _scrollController.position;
+    // If the field isn't scrollable, do nothing. For example, when the lines of
+    // text is less than maxLines, the field has nothing to scroll.
+    if (position.maxScrollExtent == 0.0 && position.minScrollExtent == 0.0) {
+      return;
+    }
+
+    final ScrollableState? state =
+        _scrollableKey.currentState as ScrollableState?;
+    final double increment =
+        ScrollAction.getDirectionalIncrement(state!, intent);
+    final double destination = clampDouble(
+      position.pixels + increment,
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (destination == position.pixels) {
+      return;
+    }
+    _scrollController.jumpTo(destination);
+  }
 
   Action<T> _makeOverridable<T extends Intent>(Action<T> defaultAction) {
     return Action<T>.overridable(
@@ -1568,10 +1848,10 @@ class RawEditorState extends EditorState
   late final Action<UpdateSelectionIntent> _updateSelectionAction =
       CallbackAction<UpdateSelectionIntent>(onInvoke: _updateSelection);
 
-  late final _UpdateTextSelectionToAdjacentLineAction<
-          ExtendSelectionVerticallyToAdjacentLineIntent> _adjacentLineAction =
-      _UpdateTextSelectionToAdjacentLineAction<
-          ExtendSelectionVerticallyToAdjacentLineIntent>(this);
+  late final _UpdateTextSelectionVerticallyAction<
+          DirectionalCaretMovementIntent> _verticalSelectionUpdateAction =
+      _UpdateTextSelectionVerticallyAction<DirectionalCaretMovementIntent>(
+          this);
 
   late final Map<Type, Action<Intent>> _actions = <Type, Action<Intent>>{
     DoNothingAndStopPropagationTextIntent: DoNothingAction(consumesKey: false),
@@ -1601,13 +1881,28 @@ class RawEditorState extends EditorState
     ExtendSelectionToLineBreakIntent: _makeOverridable(
         _UpdateTextSelectionAction<ExtendSelectionToLineBreakIntent>(
             this, true, _linebreak)),
+    ExpandSelectionToLineBreakIntent:
+        _makeOverridable(_UpdateTextSelectionAction(this, false, _linebreak)),
     ExtendSelectionVerticallyToAdjacentLineIntent:
-        _makeOverridable(_adjacentLineAction),
+        _makeOverridable(_verticalSelectionUpdateAction),
+    ExtendSelectionVerticallyToAdjacentPageIntent:
+        _makeOverridable(_verticalSelectionUpdateAction),
     ExtendSelectionToDocumentBoundaryIntent: _makeOverridable(
         _UpdateTextSelectionAction<ExtendSelectionToDocumentBoundaryIntent>(
+            this, false, _documentBoundary)),
+    ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent:
+        _makeOverridable(_UpdateTextSelectionAction<
+                ExtendSelectionToNextParagraphBoundaryOrCaretLocationIntent>(
+            this, true, _paragraphBoundary)),
+    ExpandSelectionToDocumentBoundaryIntent: _makeOverridable(
+        _UpdateTextSelectionAction<ExpandSelectionToDocumentBoundaryIntent>(
             this, true, _documentBoundary)),
     ExtendSelectionToNextWordBoundaryOrCaretLocationIntent: _makeOverridable(
         _ExtendSelectionOrCaretPositionAction(this, _nextWordBoundary)),
+    ScrollToDocumentBoundaryIntent: _makeOverridable(
+        CallbackAction<ScrollToDocumentBoundaryIntent>(
+            onInvoke: _scrollToDocumentBoundary)),
+    ScrollIntent: CallbackAction<ScrollIntent>(onInvoke: _scroll),
 
     // Copy Paste
     SelectAllTextIntent: _makeOverridable(_SelectAllAction(this)),
@@ -1629,6 +1924,10 @@ class RawEditorState extends EditorState
   /// Returns the anchor points for the default context menu.
   @override
   TextSelectionToolbarAnchors get contextMenuAnchors {
+    if (renderEditor.lastSecondaryTapDownPosition != null) {
+      return TextSelectionToolbarAnchors(
+          primaryAnchor: renderEditor.lastSecondaryTapDownPosition!);
+    }
     final selection = textEditingValue.selection;
     // Find the horizontal midpoint, just above the selected text.
     final List<TextSelectionPoint> endpoints =
@@ -1638,11 +1937,57 @@ class RawEditorState extends EditorState
     final extentLineHeight = renderEditor.preferredLineHeight(selection.extent);
     final smallestLineHeight = math.min(baseLineHeight, extentLineHeight);
 
-    return TextSelectionToolbarAnchors.fromSelection(
-        renderBox: renderEditor,
+    return _textSelectionToolbarAnchorsFromSelection(
+        renderEditor: renderEditor,
         startGlyphHeight: smallestLineHeight,
         endGlyphHeight: smallestLineHeight,
         selectionEndpoints: endpoints);
+  }
+
+  TextSelectionToolbarAnchors _textSelectionToolbarAnchorsFromSelection({
+    required RenderEditor renderEditor,
+    required double startGlyphHeight,
+    required double endGlyphHeight,
+    required List<TextSelectionPoint> selectionEndpoints,
+  }) {
+    final Rect editingRegion = Rect.fromPoints(
+      renderEditor.localToGlobal(Offset.zero),
+      renderEditor.localToGlobal(renderEditor.size.bottomRight(Offset.zero)),
+    );
+
+    if (editingRegion.left.isNaN ||
+        editingRegion.top.isNaN ||
+        editingRegion.right.isNaN ||
+        editingRegion.bottom.isNaN) {
+      return const TextSelectionToolbarAnchors(primaryAnchor: Offset.zero);
+    }
+
+    final bool isMultiline =
+        selectionEndpoints.last.point.dy - selectionEndpoints.first.point.dy >
+            endGlyphHeight / 2;
+
+    final Rect selectionRect = Rect.fromLTRB(
+      isMultiline
+          ? editingRegion.left
+          : editingRegion.left + selectionEndpoints.first.point.dx,
+      editingRegion.top + selectionEndpoints.first.point.dy - startGlyphHeight,
+      isMultiline
+          ? editingRegion.right
+          : editingRegion.left + selectionEndpoints.last.point.dx,
+      editingRegion.top + selectionEndpoints.last.point.dy,
+    );
+
+    return TextSelectionToolbarAnchors(
+      primaryAnchor: Offset(
+        selectionRect.left + selectionRect.width / 2,
+        clampDouble(selectionRect.top, editingRegion.top, editingRegion.bottom),
+      ),
+      secondaryAnchor: Offset(
+        selectionRect.left + selectionRect.width / 2,
+        clampDouble(
+            selectionRect.bottom, editingRegion.top, editingRegion.bottom),
+      ),
+    );
   }
 
   /// Returns the [ContextMenuButtonItem]s representing the buttons in this
@@ -1663,6 +2008,9 @@ class RawEditorState extends EditorState
         onSelectAll: selectAllEnabled
             ? () => selectAll(SelectionChangedCause.toolbar)
             : null,
+        onLookUp: null,
+        onSearchWeb: null,
+        onShare: null,
         onLiveTextInput: null);
   }
 
@@ -1672,8 +2020,8 @@ class RawEditorState extends EditorState
 
 class _Editor extends MultiChildRenderObjectWidget {
   const _Editor({
-    required Key key,
-    required List<Widget> children,
+    required Key super.key,
+    required super.children,
     this.offset,
     required this.document,
     required this.textDirection,
@@ -1685,7 +2033,7 @@ class _Editor extends MultiChildRenderObjectWidget {
     required this.cursorController,
     this.padding = EdgeInsets.zero,
     this.maxContentWidth,
-  }) : super(key: key, children: children);
+  });
 
   final ViewportOffset? offset;
   final ParchmentDocument document;
@@ -1733,7 +2081,7 @@ class _Editor extends MultiChildRenderObjectWidget {
   }
 }
 
-/// An interface for retriving the logical text boundary (left-closed-right-open)
+/// An interface for retrieving the logical text boundary (left-closed-right-open)
 /// at a given location in a document.
 ///
 /// Depending on the implementation of the [_TextBoundary], the input
@@ -1897,7 +2245,7 @@ class _WordBoundary extends _TextBoundary {
   }
 }
 
-// The linebreaks of the current text layout. The input [TextPosition]s are
+// The line breaks of the current text layout. The input [TextPosition]s are
 // interpreted as caret locations because [TextPainter.getLineAtOffset] is
 // text-affinity-aware.
 class _LineBreak extends _TextBoundary {
@@ -1921,6 +2269,79 @@ class _LineBreak extends _TextBoundary {
       offset: textLayout.getLineAtOffset(position).end,
       affinity: TextAffinity.upstream,
     );
+  }
+}
+
+// A text boundary that uses paragraphs as logical boundaries.
+// A paragraph is defined as the range between line terminators. If no
+// line terminators exist then the paragraph boundary is the entire document.
+class _ParagraphBoundary extends _TextBoundary {
+  const _ParagraphBoundary(this.textEditingValue);
+
+  @override
+  final TextEditingValue textEditingValue;
+
+  String get _text => textEditingValue.text;
+
+  @override
+  TextPosition getLeadingTextBoundaryAt(TextPosition position) {
+    assert(position.offset >= 0);
+
+    if (position.offset >= _text.length) {
+      return TextPosition(offset: _text.length);
+    }
+
+    if (position.offset == 0) {
+      return const TextPosition(offset: 0);
+    }
+
+    int index = position.offset;
+
+    if (index > 1 &&
+        _text.codeUnitAt(index) == 0x0A &&
+        _text.codeUnitAt(index - 1) == 0x0D) {
+      index -= 2;
+    } else if (TextLayoutMetrics.isLineTerminator(_text.codeUnitAt(index))) {
+      index -= 1;
+    }
+
+    while (index > 0) {
+      if (TextLayoutMetrics.isLineTerminator(_text.codeUnitAt(index))) {
+        return TextPosition(offset: index + 1);
+      }
+      index -= 1;
+    }
+
+    return TextPosition(offset: max(index, 0));
+  }
+
+  @override
+  TextPosition getTrailingTextBoundaryAt(TextPosition position) {
+    assert(position.offset < _text.length);
+
+    if (_text.isEmpty) {
+      return position;
+    }
+
+    if (position.offset < 0) {
+      return const TextPosition(offset: 0);
+    }
+
+    int index = position.offset;
+
+    while (!TextLayoutMetrics.isLineTerminator(_text.codeUnitAt(index))) {
+      index += 1;
+      if (index == _text.length) {
+        return TextPosition(offset: index);
+      }
+    }
+
+    return TextPosition(
+        offset: index < _text.length - 1 &&
+                _text.codeUnitAt(index) == 0x0D &&
+                _text.codeUnitAt(index + 1) == 0x0A
+            ? index + 2
+            : index + 1);
   }
 }
 
@@ -2108,6 +2529,80 @@ class _DeleteTextAction<T extends DirectionalTextEditingIntent>
       !state.widget.readOnly && state.textEditingValue.selection.isValid;
 }
 
+class _UpdateTextSelectionVerticallyAction<
+    T extends DirectionalCaretMovementIntent> extends ContextAction<T> {
+  _UpdateTextSelectionVerticallyAction(this.state);
+
+  final RawEditorState state;
+
+  FleatherVerticalCaretMovementRun? _verticalMovementRun;
+  TextSelection? _runSelection;
+
+  void stopCurrentVerticalRunIfSelectionChanges() {
+    final TextSelection? runSelection = _runSelection;
+    if (runSelection == null) {
+      assert(_verticalMovementRun == null);
+      return;
+    }
+    _runSelection = state.textEditingValue.selection;
+    final TextSelection currentSelection = state.widget.controller.selection;
+    final bool continueCurrentRun = currentSelection.isValid &&
+        currentSelection.isCollapsed &&
+        currentSelection.baseOffset == runSelection.baseOffset &&
+        currentSelection.extentOffset == runSelection.extentOffset;
+    if (!continueCurrentRun) {
+      _verticalMovementRun = null;
+      _runSelection = null;
+    }
+  }
+
+  @override
+  void invoke(T intent, [BuildContext? context]) {
+    assert(state.textEditingValue.selection.isValid);
+
+    final bool collapseSelection =
+        intent.collapseSelection || !state.widget.selectionEnabled;
+    final TextEditingValue value = state.textEditingValue;
+    if (!value.selection.isValid) {
+      return;
+    }
+
+    final currentRun = _verticalMovementRun ??
+        state.renderEditor
+            .startVerticalCaretMovement(state.renderEditor.selection.extent);
+
+    final bool shouldMove =
+        intent is ExtendSelectionVerticallyToAdjacentPageIntent
+            ? currentRun.moveByOffset(
+                (intent.forward ? 1.0 : -1.0) * state.renderEditor.size.height)
+            : intent.forward
+                ? currentRun.moveNext()
+                : currentRun.movePrevious();
+    final TextPosition newExtent = shouldMove
+        ? currentRun.current
+        : intent.forward
+            ? TextPosition(offset: state.textEditingValue.text.length)
+            : const TextPosition(offset: 0);
+    final TextSelection newSelection = collapseSelection
+        ? TextSelection.fromPosition(newExtent)
+        : value.selection.extendTo(newExtent);
+
+    Actions.invoke(
+      context!,
+      UpdateSelectionIntent(
+          value, newSelection, SelectionChangedCause.keyboard),
+    );
+    state.bringIntoView(state.textEditingValue.selection.extent);
+    if (state.textEditingValue.selection == newSelection) {
+      _verticalMovementRun = currentRun;
+      _runSelection = newSelection;
+    }
+  }
+
+  @override
+  bool get isActionEnabled => state.textEditingValue.selection.isValid;
+}
+
 class _UpdateTextSelectionAction<T extends DirectionalCaretMovementIntent>
     extends ContextAction<T> {
   _UpdateTextSelectionAction(this.state, this.ignoreNonCollapsedSelection,
@@ -2247,74 +2742,6 @@ class _ExtendSelectionOrCaretPositionAction extends ContextAction<
   @override
   bool get isActionEnabled =>
       state.widget.selectionEnabled && state.textEditingValue.selection.isValid;
-}
-
-class _UpdateTextSelectionToAdjacentLineAction<
-    T extends DirectionalCaretMovementIntent> extends ContextAction<T> {
-  _UpdateTextSelectionToAdjacentLineAction(this.state);
-
-  final RawEditorState state;
-
-  FleatherVerticalCaretMovementRun? _verticalMovementRun;
-  TextSelection? _runSelection;
-
-  void stopCurrentVerticalRunIfSelectionChanges() {
-    final TextSelection? runSelection = _runSelection;
-    if (runSelection == null) {
-      assert(_verticalMovementRun == null);
-      return;
-    }
-    _runSelection = state.textEditingValue.selection;
-    final TextSelection currentSelection = state.widget.controller.selection;
-    final bool continueCurrentRun = currentSelection.isValid &&
-        currentSelection.isCollapsed &&
-        currentSelection.baseOffset == runSelection.baseOffset &&
-        currentSelection.extentOffset == runSelection.extentOffset;
-    if (!continueCurrentRun) {
-      _verticalMovementRun = null;
-      _runSelection = null;
-    }
-  }
-
-  @override
-  void invoke(T intent, [BuildContext? context]) {
-    assert(state.textEditingValue.selection.isValid);
-
-    final bool collapseSelection =
-        intent.collapseSelection || !state.widget.selectionEnabled;
-    final TextEditingValue value = state.textEditingValue;
-    if (!value.selection.isValid) {
-      return;
-    }
-
-    final FleatherVerticalCaretMovementRun currentRun = _verticalMovementRun ??
-        state.renderEditor
-            .startVerticalCaretMovement(state.renderEditor.selection.extent);
-
-    final bool shouldMove =
-        intent.forward ? currentRun.moveNext() : currentRun.movePrevious();
-    final TextPosition newExtent = shouldMove
-        ? currentRun.current
-        : (intent.forward
-            ? TextPosition(offset: state.textEditingValue.text.length)
-            : const TextPosition(offset: 0));
-    final TextSelection newSelection = collapseSelection
-        ? TextSelection.fromPosition(newExtent)
-        : value.selection.extendTo(newExtent);
-
-    Actions.invoke(
-      context!,
-      UpdateSelectionIntent(
-          value, newSelection, SelectionChangedCause.keyboard),
-    );
-    if (state.textEditingValue.selection == newSelection) {
-      _verticalMovementRun = currentRun;
-      _runSelection = newSelection;
-    }
-  }
-
-  @override
-  bool get isActionEnabled => state.textEditingValue.selection.isValid;
 }
 
 class _SelectAllAction extends ContextAction<SelectAllTextIntent> {

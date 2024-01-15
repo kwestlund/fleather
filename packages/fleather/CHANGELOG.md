@@ -1,12 +1,43 @@
+## 1.13.2
+
+* [Fix] pub.dev issues
+
+## 1.13.1
+
+* Example enriched with ImagePicker
+* [Fix] web - erratic cursor positioning when navigating document with keyboard
+* [Fix] Persistent context menu when updating `FleatherEditor` widget
+* [Fix] pub.dev warnings - dependencies upgraded
+
+## 1.13.0
+
+* Enhanced text selection experience on mobile (including magnifier)
+* [Fix] Vertical cursor movements have incorrect behavior when initiated from a line with large embeds
+
+## 1.12.0
+
+* Introduce AutoFormats to handle automatic text formatting and make Heuristics only responsible for validity of document
+* Show context menu on desktop
+* Add unset background and text color option
+* Handle more text editing intents (See #180 for the list)
+* [Fix] toolbar button design
+* [Fix] preserve line style on new line
+* [Fix] example app build for Android
+
+## 1.11.0 
+
+* Support for Flutter 3.16
+* [Fix] exception thrown when inserting new line with toggled inline styles
+
 ## 1.10.0 
 
 * Support for Flutter 3.13
   
 ## 1.9.1
 
-* Fix light theme inline code background color for Material 3
-* Fix wrong bounding box for text lines in block
-* Fix alignment and direction in blocks
+* [Fix] light theme inline code background color for Material 3
+* [Fix] wrong bounding box for text lines in block
+* [Fix] alignment and direction in blocks
 
 ## 1.9.0
 

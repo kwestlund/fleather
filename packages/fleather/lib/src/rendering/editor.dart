@@ -60,6 +60,12 @@ abstract class RenderAbstractEditor implements TextLayoutMetrics {
       Offset lastBoundedOffset, TextPosition lastTextPosition,
       {double? resetLerpValue});
 
+  /// Tracks the position of a secondary tap event.
+  ///
+  /// Should be called before attempting to change the selection based on the
+  /// position of a secondary tap.
+  void handleSecondaryTapDown(TapDownDetails details);
+
   /// If [ignorePointer] is false (the default) then this method is called by
   /// the internal gesture recognizer's [TapGestureRecognizer.onTapDown]
   /// callback.
@@ -113,6 +119,14 @@ abstract class RenderAbstractEditor implements TextLayoutMetrics {
   /// programmatically manipulate its `value` or `selection` directly.
   /// {@endtemplate}
   void selectPosition({required SelectionChangedCause cause});
+
+  /// Starts a [FleatherVerticalCaretMovementRun] at the given location in the text, for
+  /// handling consecutive vertical caret movements.
+  ///
+  /// This can be used to handle consecutive upward/downward arrow key movements
+  /// in an editor.
+  FleatherVerticalCaretMovementRun startVerticalCaretMovement(
+      TextPosition startPosition);
 }
 
 /// Displays a Fleather document as a vertical list of document segments (lines
@@ -124,14 +138,14 @@ class RenderEditor extends RenderEditableContainerBox
     implements RenderAbstractEditor {
   RenderEditor({
     ViewportOffset? offset,
-    List<RenderEditableBox>? children,
+    super.children,
     required ParchmentDocument document,
-    required TextDirection textDirection,
+    required super.textDirection,
     required bool hasFocus,
     required TextSelection selection,
     required LayerLink startHandleLayerLink,
     required LayerLink endHandleLayerLink,
-    required EdgeInsetsGeometry padding,
+    required super.padding,
     required CursorController cursorController,
     this.onSelectionChanged,
     EdgeInsets floatingCursorAddedMargin =
@@ -140,19 +154,17 @@ class RenderEditor extends RenderEditableContainerBox
   })  : _document = document,
         _hasFocus = hasFocus,
         _selection = selection,
-        _extendSelectionOrigin = selection,
         _startHandleLayerLink = startHandleLayerLink,
         _endHandleLayerLink = endHandleLayerLink,
         _cursorController = cursorController,
         _maxContentWidth = maxContentWidth,
         super(
-          children: children,
           node: document.root,
-          textDirection: textDirection,
-          padding: padding,
         );
 
   ParchmentDocument _document;
+
+  ParchmentDocument get document => _document;
 
   set document(ParchmentDocument value) {
     if (_document == value) {
@@ -187,6 +199,10 @@ class RenderEditor extends RenderEditableContainerBox
     markNeedsLayout();
   }
 
+  Offset? _lastSecondaryTapDownPosition;
+
+  Offset? get lastSecondaryTapDownPosition => _lastSecondaryTapDownPosition;
+
   /// The region of text that is selected, if any.
   ///
   /// The caret position is represented by a collapsed selection.
@@ -200,17 +216,7 @@ class RenderEditor extends RenderEditableContainerBox
     if (_selection == value) return;
     _selection = value;
     markNeedsPaint();
-
-    if (!_shiftPressed && !_isDragging) {
-      // Only update extend selection origin if Shift key is not pressed and
-      // user is not dragging selection.
-      _extendSelectionOrigin = _selection;
-    }
   }
-
-  bool get _shiftPressed =>
-      RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-      RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shiftLeft);
 
   /// The [LayerLink] of start selection handle.
   ///
@@ -239,6 +245,8 @@ class RenderEditor extends RenderEditableContainerBox
   }
 
   double? _maxContentWidth;
+
+  double? get maxContentWidth => _maxContentWidth;
 
   set maxContentWidth(double? value) {
     if (_maxContentWidth == value) return;
@@ -359,7 +367,6 @@ class RenderEditor extends RenderEditableContainerBox
   @override
   List<TextSelectionPoint> getEndpointsForSelection(TextSelection selection) {
     // _layoutText(minWidth: constraints.minWidth, maxWidth: constraints.maxWidth);
-
     if (selection.isCollapsed) {
       final child = childAtPosition(selection.extent);
       final localPosition =
@@ -413,33 +420,15 @@ class RenderEditor extends RenderEditableContainerBox
 
   Offset? _lastTapDownPosition;
 
-  // Used on Desktop (mouse and keyboard enabled platforms) as base offset
-  // for extending selection, either with combination of `Shift` + Click or
-  // by dragging
-  TextSelection? _extendSelectionOrigin;
+  @override
+  void handleSecondaryTapDown(TapDownDetails details) {
+    _lastTapDownPosition = details.globalPosition;
+    _lastSecondaryTapDownPosition = details.globalPosition;
+  }
 
   @override
   void handleTapDown(TapDownDetails details) {
     _lastTapDownPosition = details.globalPosition;
-  }
-
-  bool _isDragging = false;
-
-  void handleDragStart(DragStartDetails details) {
-    _isDragging = true;
-
-    final newSelection = selectPositionAt(
-      from: details.globalPosition,
-      cause: SelectionChangedCause.drag,
-    );
-
-    if (newSelection == null) return;
-    // Make sure to remember the origin for extend selection.
-    _extendSelectionOrigin = newSelection;
-  }
-
-  void handleDragEnd(DragEndDetails details) {
-    _isDragging = false;
   }
 
   /// Called when the selection changes.
@@ -470,34 +459,6 @@ class RenderEditor extends RenderEditableContainerBox
       ),
       cause,
     );
-  }
-
-  /// Extends current selection to the position closest to specified offset.
-  void extendSelection(Offset to, {required SelectionChangedCause cause}) {
-    /// The below logic does not exactly match the native version because
-    /// we do not allow swapping of base and extent positions.
-    assert(_extendSelectionOrigin != null);
-    final position = getPositionForOffset(to);
-
-    if (position.offset < _extendSelectionOrigin!.baseOffset) {
-      _handleSelectionChange(
-        TextSelection(
-          baseOffset: position.offset,
-          extentOffset: _extendSelectionOrigin!.extentOffset,
-          affinity: selection.affinity,
-        ),
-        cause,
-      );
-    } else if (position.offset > _extendSelectionOrigin!.extentOffset) {
-      _handleSelectionChange(
-        TextSelection(
-          baseOffset: _extendSelectionOrigin!.baseOffset,
-          extentOffset: position.offset,
-          affinity: selection.affinity,
-        ),
-        cause,
-      );
-    }
   }
 
   @override
@@ -914,6 +875,9 @@ class RenderEditor extends RenderEditableContainerBox
         // first character
         newPosition = const TextPosition(offset: 0);
       } else {
+        // TODO: in the case of a SpanEmbed, caret is drawn with "normal" line height
+        // As the caret offset is used to get the position of the above line, when the embed is much higher than the
+        // caret height the "above" position doesn't change
         final caretOffset = child.getOffsetForCaret(localPosition);
         final testPosition = TextPosition(offset: sibling.node.length - 1);
         final testOffset = sibling.getOffsetForCaret(testPosition);
@@ -951,9 +915,9 @@ class RenderEditor extends RenderEditableContainerBox
         newPosition = TextPosition(offset: _document.length - 1);
       } else {
         final caretOffset = child.getOffsetForCaret(localPosition);
-        const testPosition = TextPosition(offset: 0);
-        final testOffset = sibling.getOffsetForCaret(testPosition);
-        final finalOffset = Offset(caretOffset.dx, testOffset.dy);
+        const textPosition = TextPosition(offset: 0);
+        final textOffset = sibling.getOffsetForCaret(textPosition);
+        final finalOffset = Offset(caretOffset.dx, textOffset.dy);
         final siblingPosition = sibling.getPositionForOffset(finalOffset);
         newPosition = TextPosition(
             offset: sibling.node.documentOffset + siblingPosition.offset);
@@ -967,6 +931,7 @@ class RenderEditor extends RenderEditableContainerBox
 
   // End TextLayoutMetrics implementation
 
+  @override
   FleatherVerticalCaretMovementRun startVerticalCaretMovement(
       TextPosition startPosition) {
     return FleatherVerticalCaretMovementRun._(
@@ -999,16 +964,50 @@ class FleatherVerticalCaretMovementRun implements Iterator<TextPosition> {
 
   @override
   bool moveNext() {
-    _currentTextPosition = _editor.getTextPositionBelow(_currentTextPosition);
+    final newCurrentTextPosition =
+        _editor.getTextPositionBelow(_currentTextPosition);
+    if (newCurrentTextPosition == _currentTextPosition) return false;
+    _currentTextPosition = newCurrentTextPosition;
     return true;
   }
 
   /// Move back to the previous element.
   ///
-  /// Returns true and updates [current] if successful.
+  /// Returns `true` if previous exists and updates [current] if successful.
   bool movePrevious() {
-    _currentTextPosition = _editor.getTextPositionAbove(_currentTextPosition);
+    final newCurrentTextPosition =
+        _editor.getTextPositionAbove(_currentTextPosition);
+    if (newCurrentTextPosition == _currentTextPosition) return false;
+    _currentTextPosition = newCurrentTextPosition;
     return true;
+  }
+
+  bool moveByOffset(double offset) {
+    RenderEditableBox child = _editor.childAtPosition(_currentTextPosition);
+    Offset currentOffset = child.localToGlobal(Offset.zero);
+    final initialOffset = currentOffset;
+    if (offset >= 0.0) {
+      while (currentOffset.dy < initialOffset.dy + offset) {
+        final didMove = moveNext();
+        child = _editor.childAtPosition(_currentTextPosition);
+        final lineHeight =
+            child.preferredLineHeight(const TextPosition(offset: 0));
+        currentOffset = child.localToGlobal(Offset(0, lineHeight));
+        if (!didMove) {
+          break;
+        }
+      }
+    } else {
+      while (currentOffset.dy > initialOffset.dy + offset) {
+        final didMove = movePrevious();
+        child = _editor.childAtPosition(_currentTextPosition);
+        currentOffset = child.localToGlobal(Offset.zero);
+        if (!didMove) {
+          break;
+        }
+      }
+    }
+    return initialOffset != currentOffset;
   }
 }
 

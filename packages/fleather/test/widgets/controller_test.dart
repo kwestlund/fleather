@@ -1,10 +1,10 @@
 // Copyright (c) 2018, the Zefyr project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+import 'package:fake_async/fake_async.dart';
 import 'package:fleather/fleather.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fake_async/fake_async.dart';
 import 'package:quill_delta/quill_delta.dart';
 
 void main() {
@@ -13,7 +13,7 @@ void main() {
 
     setUp(() {
       final doc = ParchmentDocument();
-      controller = FleatherController(doc);
+      controller = FleatherController(document: doc);
     });
 
     test('dispose', () {
@@ -33,7 +33,8 @@ void main() {
     });
 
     test('new selection reset toggled styles', () {
-      controller = FleatherController(ParchmentDocument.fromJson([
+      controller = FleatherController(
+          document: ParchmentDocument.fromJson([
         {'insert': 'Some text\n'}
       ]));
       controller.formatText(2, 0, ParchmentAttribute.bold);
@@ -126,6 +127,22 @@ void main() {
           ..insert('\n'),
       );
       // expect(controller.lastChangeSource, ChangeSource.local);
+    });
+
+    test('replaceText only applies toggled styles to non new line parts', () {
+      controller.replaceText(0, 0, 'Words');
+      controller.formatText(2, 0, ParchmentAttribute.bold);
+      controller.replaceText(2, 0, '\nTest\n');
+
+      expect(
+        controller.document.toDelta(),
+        Delta()
+          ..insert('Wo\n')
+          ..insert('Test', ParchmentAttribute.bold.toJson())
+          ..insert('\n')
+          ..insert('rds')
+          ..insert('\n'),
+      );
     });
 
     test('insert text with toggled style unset', () {
@@ -240,6 +257,7 @@ void main() {
           expect(controller.document.toDelta(), expDelta);
         });
       });
+
       test('undoes twice', () {
         fakeAsync((async) {
           controller.compose(Delta()..insert('Hello'));
@@ -274,6 +292,92 @@ void main() {
           controller.undo();
           expect(controller.document.toDelta(), Delta()..insert('\n'));
         });
+      });
+    });
+
+    group('autoformats', () {
+      test('Link detection', () {
+        const text = 'Some link https://fleather-editor.github.io';
+        const selection = TextSelection.collapsed(offset: text.length);
+        controller.replaceText(0, 0, text);
+        controller.replaceText(text.length, 0, ' ', selection: selection);
+        final attributes = controller.document.toDelta().toList()[1].attributes;
+        expect(attributes!.containsKey(ParchmentAttribute.link.key), isTrue);
+        expect(controller.selection, selection);
+      });
+
+      test('History undo of link detection', () {
+        fakeAsync((async) {
+          const text = 'Some link https://fleather-editor.github.io';
+          const selection = TextSelection.collapsed(offset: text.length);
+          controller.replaceText(0, 0, text,
+              selection:
+                  const TextSelection.collapsed(offset: text.length - 1));
+          async.flushTimers();
+          controller.replaceText(text.length, 0, ' ', selection: selection);
+          async.flushTimers();
+          controller.undo();
+          expect(controller.document.toDelta().length, 1);
+          expect(controller.document.toDelta()[0].data,
+              'Some link https://fleather-editor.github.io\n');
+          expect(controller.document.toDelta()[0].attributes, isNull);
+        });
+      });
+
+      test('Undo link detection', () {
+        const text = 'Some link https://fleather-editor.github.io';
+        const selection = TextSelection.collapsed(offset: text.length);
+        controller.replaceText(0, 0, text);
+        controller.replaceText(text.length, 0, ' ', selection: selection);
+        controller.replaceText(text.length, 1, '',
+            selection: const TextSelection.collapsed(offset: text.length));
+        final documentDelta = controller.document.toDelta();
+        expect(documentDelta.length, 1);
+        expect(documentDelta.first.attributes, isNull);
+      });
+
+      test('De-activate suggestion', () {
+        const text = 'Some link https://fleather-editor.github.io';
+        const selection = TextSelection.collapsed(offset: text.length);
+        controller.replaceText(0, 0, text);
+        controller.replaceText(text.length, 0, ' ', selection: selection);
+        controller.replaceText(text.length + 1, 0, ' ', selection: selection);
+        controller.replaceText(text.length + 1, 1, '',
+            selection: const TextSelection.collapsed(offset: text.length + 1));
+        controller.replaceText(text.length, 1, '',
+            selection: const TextSelection.collapsed(offset: text.length));
+        final attributes = controller.document.toDelta().toList()[1].attributes;
+        expect(attributes!.containsKey(ParchmentAttribute.link.key), isTrue);
+        expect(controller.selection, selection);
+      });
+
+      test('Markdown shortcuts', () {
+        const text = 'Some line\n*';
+        const selection = TextSelection.collapsed(offset: text.length);
+        controller.replaceText(0, 0, '$text\n');
+        controller.replaceText(text.length, 0, ' ', selection: selection);
+        final attributes = controller.document.toDelta().toList()[1].attributes;
+        expect(attributes!.containsKey(ParchmentAttribute.block.key), isTrue);
+        expect(attributes[ParchmentAttribute.block.key],
+            ParchmentAttribute.block.bulletList.value);
+        expect(controller.selection,
+            const TextSelection.collapsed(offset: text.length - 1));
+      });
+
+      test('Undo markdown shortcuts', () {
+        const text = 'Some line\n*';
+        const selection = TextSelection.collapsed(offset: text.length);
+        controller.replaceText(0, 0, '$text\n');
+        controller.replaceText(text.length, 0, ' ', selection: selection);
+        controller.replaceText('Some line\n'.length - 1, 1, '',
+            selection: const TextSelection.collapsed(offset: text.length));
+        final documentDelta = controller.document.toDelta();
+        expect(documentDelta.length, 1);
+        expect(documentDelta.first.attributes, isNull);
+        expect(
+            controller.selection,
+            const TextSelection.collapsed(
+                offset: text.length + 1 /* added space*/));
       });
     });
   });
