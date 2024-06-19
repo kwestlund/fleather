@@ -79,7 +79,6 @@ class RenderEditableTextLine extends RenderEditableBox {
     }
     _selection = value;
     _selectionRects = null;
-    _containsCursor = null;
     if (attached && containsCursor) {
       _cursorController.addListener(markNeedsLayout);
       _cursorController.cursorColor.addListener(markNeedsPaint);
@@ -110,7 +109,7 @@ class RenderEditableTextLine extends RenderEditableBox {
   /// manipulation. It's the responsibility of this object's owner
   /// to provide selection manipulation affordances.
   ///
-  /// This field is used by [selectionEnabled] (which then controls
+  /// This field is used by [_shouldPaintSelection] (which then controls
   /// the accessibility hints mentioned above).
   bool get enableInteractiveSelection => _enableInteractiveSelection;
   bool _enableInteractiveSelection;
@@ -122,17 +121,13 @@ class RenderEditableTextLine extends RenderEditableBox {
     markNeedsSemanticsUpdate(); // TODO: should probably update semantics on the RenderEditor instead.
   }
 
-  /// Whether interactive selection are enabled based on the value of
-  /// [enableInteractiveSelection].
+  /// Whether selection should be painted based on the value of
+  /// [enableInteractiveSelection] and [hasFocus].
   ///
   /// If [enableInteractiveSelection] is not set then defaults to `true`.
-  bool get selectionEnabled {
-    return enableInteractiveSelection;
-  }
+  bool get _shouldPaintSelection => enableInteractiveSelection && hasFocus;
 
-  bool get containsSelection {
-    return intersectsWithSelection(node, _selection);
-  }
+  bool get containsSelection => intersectsWithSelection(node, _selection);
 
   // End selection implementation
 
@@ -147,6 +142,7 @@ class RenderEditableTextLine extends RenderEditableBox {
       return;
     }
     _hasFocus = value;
+    markNeedsPaint();
   }
 
   /// The pixel ratio of the current device.
@@ -212,7 +208,6 @@ class RenderEditableTextLine extends RenderEditableBox {
       return;
     }
     _node = value;
-    _containsCursor = null;
     markNeedsLayout();
   }
 
@@ -282,8 +277,13 @@ class RenderEditableTextLine extends RenderEditableBox {
   // Computes the line box height for the position.
   double _getLineHeightForPosition(TextPosition position) {
     final lineBoundary = getLineBoundary(position);
-    final boxes = body!.getBoxesForSelection(TextSelection(
+    var boxes = body!.getBoxesForSelection(TextSelection(
         baseOffset: lineBoundary.start, extentOffset: lineBoundary.end));
+    // Boxes are empty for an empty line (containing only \n)
+    if (boxes.isEmpty && lineBoundary == const TextRange.collapsed(0)) {
+      boxes = body!.getBoxesForSelection(TextSelection(
+          baseOffset: lineBoundary.start, extentOffset: lineBoundary.end + 1));
+    }
     return boxes.fold(0, (v, e) => math.max(v, e.toRect().height));
   }
 
@@ -466,10 +466,12 @@ class RenderEditableTextLine extends RenderEditableBox {
   /// state. In some cases the node gets detached from its document before this
   /// render object is detached from the render tree. This causes containsCursor
   /// to fail with an NPE when it's called from [detach].
-  bool? _containsCursor;
+  /// TODO: Investigate if this is still the case and [_containsCursor] is needed.
+  bool _containsCursor = false;
 
   bool get containsCursor {
-    return _containsCursor ??= _cursorController.isFloatingCursorActive
+    if (node.parent == null) return _containsCursor;
+    return _containsCursor = _cursorController.isFloatingCursorActive
         ? node.containsOffset(
             _cursorController.floatingCursorTextPosition.value!.offset)
         : selection.isCollapsed && node.containsOffset(selection.baseOffset);
@@ -506,7 +508,6 @@ class RenderEditableTextLine extends RenderEditableBox {
   }
 
   void _onFloatingCursorChange() {
-    _containsCursor = null;
     markNeedsPaint();
   }
 
@@ -702,7 +703,7 @@ class RenderEditableTextLine extends RenderEditableBox {
         _paintTextBackground(context, item, effectiveOffset);
       }
 
-      if (selectionEnabled && containsSelection) {
+      if (_shouldPaintSelection && containsSelection) {
         final local = localSelection(node, selection);
         _selectionRects ??= body!.getBoxesForSelection(local);
         _paintSelection(context, effectiveOffset);

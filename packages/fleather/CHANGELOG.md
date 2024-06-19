@@ -1,3 +1,53 @@
+## 1.15.0+1
+
+* Upgrade to Flutter 3.22
+* Remove selection gestures when enableInteractiveSelection is `false`
+* Upgrade dependencies
+
+## 1.14.5+1
+
+* [Fix] toolbar moving out of viewport upon scrolling
+* [Fix] list number using the wrong theme
+* [Fix] link bottom sheet UI issues
+* [Fix] toolbar selector positioning
+* [Fix] scroll to cursor when cursor is bigger than viewport
+
+## 1.14.4
+
+* [Fix] selection handles not disposed after disposing selection overlay
+* [Fix] wrong selection after pasting
+* [Fix] multiple cursor on editor after selecting Android keyboard suggestion  
+* [Fix] FleatherThemeData.merge not applying heading 6 theme
+* [Fix] get selection style for beginning of new line
+* [Fix] sending invalid composing range to engine
+
+## 1.14.3
+
+* Hide collapsed selection handle in read-only mode
+* Hide text selection highlight when editor is unfocused
+* Scroll to selection after keyboard opened
+
+## 1.14.2
+
+* Update selection correctly after pasting text
+* Make color attributes toggleable
+* Revert "Use normalized text editing value for updating remote value"
+
+## 1.14.1
+
+* Use normalized text editing value for updating remote value
+* Expose `SelectorScope`
+* Remove `dart:io` usages
+* Relax `intl` version
+
+## 1.14.0+1
+
+* Add `ClipboardManager` which can be used to implement rich clipboard
+* Use overlay entries to prevent focus loss when selection color or heading in default toolbar
+* Replace quill_delta package with parchment_delta
+* [Fix] Caret movement issues
+* [Fix] Caret painting on focus gain
+
 ## 1.13.2
 
 * [Fix] pub.dev issues

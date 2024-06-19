@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:html/dom.dart' as html;
 import 'package:html/parser.dart';
-import 'package:parchment/parchment.dart';
-import 'package:quill_delta/quill_delta.dart';
+import 'package:parchment_delta/parchment_delta.dart';
 
+import '../document.dart';
+import '../document/attributes.dart';
+import '../document/embeds.dart';
 import 'html_utils.dart';
 
 final _inlineAttributesParchmentToHtml = {
@@ -43,6 +45,8 @@ const _indentWidthInPx = 32;
 ///           `<div class"checklist-item><input type="checklist" checked><label>`
 /// - alignment -> `<xxx align="left | right | center | justify">`
 /// - direction -> `<xxx dir="rtl">`
+/// - indentation -> `<xxx style=padding-left:16px>`
+/// - only one level is supported when decoding
 ///
 /// ## Embed mapping
 /// - [BlockEmbed.image] -> `<img src="...">`
@@ -66,6 +70,7 @@ class ParchmentHtmlCodec extends Codec<ParchmentDocument, String> {
 // Mutable record for the state of the encoder
 class _EncoderState {
   StringBuffer buffer = StringBuffer();
+
   // Stack on inline tags
   final List<_HtmlInlineTag> openInlineTags = [];
 
@@ -885,12 +890,22 @@ class _ParchmentHtmlDecoder extends Converter<String, ParchmentDocument> {
     }
     if (node is html.Element) {
       if (node.localName == 'hr') {
+        // <hr> is a block element and cannot be enclosed in <p>
         delta.insert(BlockEmbed.horizontalRule.toJson());
+        delta.insert('\n');
         return delta;
       }
       if (node.localName == 'img') {
         final src = node.attributes['src'] ?? '';
         delta.insert(BlockEmbed.image(src).toJson());
+        // <img> can be enclosed in a <p> element, but
+        // we only want to support <p> with only one node (<img>)
+        if (node.parent is html.Element &&
+            node.parent!.localName == 'p' &&
+            node.parent!.children.length == 1) {
+          return delta;
+        }
+        delta.insert('\n');
         return delta;
       }
       inlineStyle = _updateInlineStyle(node, inlineStyle);
@@ -1003,14 +1018,22 @@ class _ParchmentHtmlDecoder extends Converter<String, ParchmentDocument> {
         switch (sValue) {
           case 'right':
             updated = updated.put(ParchmentAttribute.right);
-            break;
+            continue;
           case 'center':
             updated = updated.put(ParchmentAttribute.center);
-            break;
+            continue;
           case 'justify':
             updated = updated.put(ParchmentAttribute.justify);
         }
-        break;
+        continue;
+      }
+      if (style.startsWith('padding-left')) {
+        final sValue = style.split(':')[1];
+        if (sValue == '0' || sValue == '0px' || sValue == 'Oem') {
+          continue;
+        }
+        updated = updated.put(ParchmentAttribute.indent.withLevel(1));
+        continue;
       }
     }
     return updated;

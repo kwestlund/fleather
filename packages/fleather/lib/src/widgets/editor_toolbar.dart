@@ -1,8 +1,11 @@
-import 'dart:io';
+import 'dart:async';
 
-import 'package:fleather/fleather.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:parchment/parchment.dart';
+
+import 'controller.dart';
+import 'theme.dart';
 
 const double kToolbarHeight = 56.0;
 
@@ -397,39 +400,26 @@ class _ColorButtonState extends State<ColorButton> {
 
   Future<Color?> _defaultPickColor(
       BuildContext context, String nullColorLabel) async {
-    // kIsWeb important here as Platform.xxx will cause a crash en web
-    final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final isMobile = switch (defaultTargetPlatform) {
+      TargetPlatform.android || TargetPlatform.iOS => true,
+      _ => false,
+    };
     final maxWidth = isMobile ? 200.0 : 100.0;
 
-    final renderBox = context.findRenderObject() as RenderBox;
-    final offset = renderBox.localToGlobal(Offset.zero) + Offset(0, buttonSize);
+    final completer = Completer<Color?>();
 
     final selector = Material(
+      key: const Key('color_selector'),
       elevation: 4.0,
       color: Theme.of(context).canvasColor,
       child: Container(
           constraints: BoxConstraints(maxWidth: maxWidth),
           padding: const EdgeInsets.all(8.0),
-          child: _ColorPalette(nullColorLabel)),
+          child: _ColorPalette(nullColorLabel,
+              onSelectedColor: completer.complete)),
     );
 
-    return Navigator.of(context).push<Color>(
-      RawDialogRoute(
-        barrierColor: Colors.transparent,
-        pageBuilder: (context, _, __) {
-          return Stack(
-            children: [
-              Positioned(
-                key: const Key('color_palette'),
-                top: offset.dy,
-                left: offset.dx,
-                child: selector,
-              )
-            ],
-          );
-        },
-      ),
-    );
+    return SelectorScope.showSelector(context, selector, completer);
   }
 
   @override
@@ -455,8 +445,8 @@ class _ColorButtonState extends State<ColorButton> {
 
   @override
   void dispose() {
-    widget.controller.removeListener(_didChangeEditingValue);
     super.dispose();
+    widget.controller.removeListener(_didChangeEditingValue);
   }
 
   @override
@@ -507,9 +497,10 @@ class _ColorPalette extends StatelessWidget {
     Colors.black,
   ];
 
-  const _ColorPalette(this.nullColorLabel);
+  const _ColorPalette(this.nullColorLabel, {required this.onSelectedColor});
 
   final String nullColorLabel;
+  final void Function(Color?) onSelectedColor;
 
   @override
   Widget build(BuildContext context) {
@@ -519,31 +510,33 @@ class _ColorPalette extends StatelessWidget {
       runSpacing: 4,
       spacing: 4,
       children: [...colors]
-          .map((e) => _ColorPaletteElement(e, nullColorLabel))
+          .map((e) => _ColorPaletteElement(e, nullColorLabel, onSelectedColor))
           .toList(),
     );
   }
 }
 
 class _ColorPaletteElement extends StatelessWidget {
-  const _ColorPaletteElement(this.color, this.nullColorLabel);
+  const _ColorPaletteElement(
+      this.color, this.nullColorLabel, this.onSelectedColor);
 
   final Color? color;
   final String nullColorLabel;
+  final void Function(Color?) onSelectedColor;
 
   @override
   Widget build(BuildContext context) {
-    // kIsWeb important here as Platform.xxx will cause a crash en web
-    final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final isMobile = switch (defaultTargetPlatform) {
+      TargetPlatform.android || TargetPlatform.iOS => true,
+      _ => false,
+    };
     final size = isMobile ? 32.0 : 16.0;
     return Container(
       width: (color == null ? 4 : 1) * size + (color == null ? 3 * 4 : 0),
       height: size,
-      decoration: BoxDecoration(
-        color: color,
-      ),
+      decoration: BoxDecoration(color: color),
       child: RawMaterialButton(
-        onPressed: () => Navigator.pop(context, color),
+        onPressed: () => onSelectedColor(color),
         child: color == null
             ? Text(
                 nullColorLabel,
@@ -593,10 +586,6 @@ class _SelectHeadingButtonState extends State<SelectHeadingButton> {
     });
   }
 
-  void _selectAttribute(ParchmentAttribute<int> value) {
-    widget.controller.formatSelection(value);
-  }
-
   @override
   void initState() {
     super.initState();
@@ -618,8 +607,8 @@ class _SelectHeadingButtonState extends State<SelectHeadingButton> {
 
   @override
   void dispose() {
-    widget.controller.removeListener(_didChangeEditingValue);
     super.dispose();
+    widget.controller.removeListener(_didChangeEditingValue);
   }
 
   @override
@@ -633,50 +622,39 @@ class _SelectHeadingButtonState extends State<SelectHeadingButton> {
         elevation: 0,
         hoverElevation: 0,
         highlightElevation: 0,
-        onPressed: _selectHeading,
+        onPressed: () async {
+          final attribute = await _selectHeading();
+          if (attribute != null) {
+            widget.controller.formatSelection(attribute);
+          }
+        },
         child: Text(_headingToText[current] ?? ''),
       ),
     );
   }
 
-  Future<void> _selectHeading() async {
-    final renderBox = context.findRenderObject() as RenderBox;
-    final offset =
-        renderBox.localToGlobal(Offset.zero) + Offset(0, buttonHeight);
+  Future<ParchmentAttribute<int>?> _selectHeading() async {
     final themeData = FleatherTheme.of(context)!;
 
+    final completer = Completer<ParchmentAttribute<int>?>();
+
     final selector = Material(
+      key: const Key('heading_selector'),
       elevation: 4.0,
       borderRadius: BorderRadius.circular(2),
       color: Theme.of(context).canvasColor,
-      child: _HeadingList(theme: themeData),
+      child: _HeadingList(theme: themeData, onSelected: completer.complete),
     );
 
-    final newValue = await Navigator.of(context).push<ParchmentAttribute<int>>(
-      RawDialogRoute(
-        barrierColor: Colors.transparent,
-        pageBuilder: (context, _, __) {
-          return Stack(
-            children: [
-              Positioned(
-                top: offset.dy,
-                left: offset.dx,
-                child: selector,
-              )
-            ],
-          );
-        },
-      ),
-    );
-
-    if (newValue != null) _selectAttribute(newValue);
+    return SelectorScope.showSelector(context, selector, completer);
   }
 }
 
 class _HeadingList extends StatelessWidget {
-  final FleatherThemeData theme;
+  const _HeadingList({required this.theme, required this.onSelected});
 
-  const _HeadingList({required this.theme});
+  final FleatherThemeData theme;
+  final void Function(ParchmentAttribute<int>) onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -706,24 +684,31 @@ class _HeadingList extends StatelessWidget {
       ParchmentAttribute.heading.level6: theme?.heading6.style,
     };
     return _HeadingListEntry(
-        value: value, text: text, style: valueToStyle[value]);
+        value: value,
+        text: text,
+        style: valueToStyle[value],
+        onSelected: onSelected);
   }
 }
 
 class _HeadingListEntry extends StatelessWidget {
+  const _HeadingListEntry(
+      {required this.value,
+      required this.text,
+      required this.style,
+      required this.onSelected});
+
   final ParchmentAttribute<int> value;
   final String text;
   final TextStyle? style;
-
-  const _HeadingListEntry(
-      {required this.value, required this.text, required this.style});
+  final void Function(ParchmentAttribute<int>) onSelected;
 
   @override
   Widget build(BuildContext context) {
     return RawMaterialButton(
       key: Key('heading_entry${value.value ?? 0}'),
       clipBehavior: Clip.antiAlias,
-      onPressed: () => Navigator.pop(context, value),
+      onPressed: () => onSelected(value),
       child: Container(
         alignment: Alignment.centerLeft,
         padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
@@ -1159,14 +1144,16 @@ class _FleatherToolbarState extends State<FleatherToolbar> {
   Widget build(BuildContext context) {
     return FleatherTheme(
       data: theme,
-      child: Container(
-        padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 8),
-        constraints:
-            BoxConstraints.tightFor(height: widget.preferredSize.height),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: widget.children,
+      child: SelectorScope(
+        child: Container(
+          padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 8),
+          constraints:
+              BoxConstraints.tightFor(height: widget.preferredSize.height),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: widget.children,
+            ),
           ),
         ),
       ),
@@ -1211,5 +1198,215 @@ class FLIconButton extends StatelessWidget {
         child: icon,
       ),
     );
+  }
+}
+
+class SelectorScope extends StatefulWidget {
+  final Widget child;
+
+  const SelectorScope({super.key, required this.child});
+
+  static SelectorScopeState of(BuildContext context) =>
+      context.findAncestorStateOfType<SelectorScopeState>()!;
+
+  /// The [context] should belong to the presenter widget.
+  static Future<T?> showSelector<T>(
+          BuildContext context, Widget selector, Completer<T?> completer,
+          {bool rootOverlay = false}) =>
+      SelectorScope.of(context)
+          .showSelector(context, selector, completer, rootOverlay: rootOverlay);
+
+  @override
+  State<SelectorScope> createState() => SelectorScopeState();
+}
+
+class SelectorScopeState extends State<SelectorScope> {
+  OverlayEntry? _overlayEntry;
+
+  /// The [context] should belong to the presenter widget.
+  Future<T?> showSelector<T>(
+      BuildContext context, Widget selector, Completer<T?> completer,
+      {bool rootOverlay = false}) {
+    _overlayEntry?.remove();
+
+    final overlay = Overlay.of(context, rootOverlay: rootOverlay);
+
+    final RenderBox presenter = context.findRenderObject() as RenderBox;
+    final RenderBox overlayBox =
+        overlay.context.findRenderObject() as RenderBox;
+    final offset = Offset(0.0, presenter.size.height);
+    final position = RelativeRect.fromSize(
+      Rect.fromPoints(
+        presenter.localToGlobal(offset, ancestor: overlayBox),
+        presenter.localToGlobal(
+          presenter.size.bottomRight(Offset.zero) + offset,
+          ancestor: overlayBox,
+        ),
+      ),
+      overlayBox.size,
+    );
+
+    _overlayEntry = OverlayEntry(
+      builder: (context) {
+        final mediaQueryData = MediaQuery.of(context);
+        return CustomSingleChildLayout(
+          delegate: _SelectorLayout(
+            position,
+            Directionality.of(context),
+            mediaQueryData.padding + mediaQueryData.viewInsets,
+            DisplayFeatureSubScreen.avoidBounds(mediaQueryData).toSet(),
+          ),
+          child: TapRegion(
+            child: selector,
+            onTapOutside: (_) => completer.complete(null),
+          ),
+        );
+      },
+    );
+    _overlayEntry?.addListener(() {
+      if (_overlayEntry?.mounted != true && !completer.isCompleted) {
+        _overlayEntry?.dispose();
+        _overlayEntry = null;
+        completer.complete(null);
+      }
+    });
+    completer.future.whenComplete(removeEntry);
+    overlay.insert(_overlayEntry!);
+    return completer.future;
+  }
+
+  void removeEntry() {
+    if (_overlayEntry == null) return;
+    _overlayEntry!.remove();
+    _overlayEntry!.dispose();
+    _overlayEntry = null;
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    removeEntry();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
+  }
+}
+
+const _selectorScreenPadding = 8.0;
+
+// This is a clone of _PopupMenuRouteLayout from Flutter with some modifications
+class _SelectorLayout extends SingleChildLayoutDelegate {
+  _SelectorLayout(
+    this.position,
+    this.textDirection,
+    this.padding,
+    this.avoidBounds,
+  );
+
+  // Rectangle of underlying button, relative to the overlay's dimensions.
+  final RelativeRect position;
+
+  // Whether to prefer going to the left or to the right.
+  final TextDirection textDirection;
+
+  // The padding of unsafe area.
+  EdgeInsets padding;
+
+  // List of rectangles that we should avoid overlapping. Unusable screen area.
+  final Set<Rect> avoidBounds;
+
+  // We put the child wherever position specifies, so long as it will fit within
+  // the specified parent size padded (inset) by [_selectorScreenPadding].
+  // If necessary, we adjust the child's position so that it fits.
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    // The menu can be at most the size of the overlay minus 8.0 pixels in each
+    // direction.
+    return BoxConstraints.loose(constraints.biggest).deflate(
+      const EdgeInsets.all(_selectorScreenPadding) + padding,
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    // size: The size of the overlay.
+    // childSize: The size of the menu, when fully open, as determined by
+    // getConstraintsForChild.
+
+    final double y = position.top;
+
+    // Find the ideal horizontal position.
+    double x;
+    if (position.right > childSize.width) {
+      // Menu button is closer to the left edge, so grow to the right, aligned to the left edge.
+      x = position.left;
+    } else if (position.left > childSize.width) {
+      // Menu button is closer to the right edge, so grow to the left, aligned to the right edge.
+      x = size.width - position.right - childSize.width;
+    } else {
+      switch (textDirection) {
+        case TextDirection.rtl:
+          x = size.width - position.right - childSize.width;
+        case TextDirection.ltr:
+          x = position.left;
+      }
+    }
+
+    final Offset wantedPosition = Offset(x, y);
+    final Offset originCenter = position.toRect(Offset.zero & size).center;
+    final Iterable<Rect> subScreens =
+        DisplayFeatureSubScreen.subScreensInBounds(
+            Offset.zero & size, avoidBounds);
+    final Rect subScreen = _closestScreen(subScreens, originCenter);
+    return _fitInsideScreen(subScreen, childSize, wantedPosition);
+  }
+
+  Rect _closestScreen(Iterable<Rect> screens, Offset point) {
+    Rect closest = screens.first;
+    for (final Rect screen in screens) {
+      if ((screen.center - point).distance <
+          (closest.center - point).distance) {
+        closest = screen;
+      }
+    }
+    return closest;
+  }
+
+  Offset _fitInsideScreen(Rect screen, Size childSize, Offset wantedPosition) {
+    double x = wantedPosition.dx;
+    double y = wantedPosition.dy;
+    // Avoid going outside an area defined as the rectangle 8.0 pixels from the
+    // edge of the screen in every direction.
+    if (x < screen.left + _selectorScreenPadding + padding.left) {
+      x = screen.left + _selectorScreenPadding + padding.left;
+    } else if (x + childSize.width >
+        screen.right - _selectorScreenPadding - padding.right) {
+      x = screen.right -
+          childSize.width -
+          _selectorScreenPadding -
+          padding.right;
+    }
+    if (y < screen.top + _selectorScreenPadding + padding.top) {
+      y = _selectorScreenPadding + padding.top;
+    } else if (y + childSize.height >
+        screen.bottom - _selectorScreenPadding - padding.bottom) {
+      y = screen.bottom -
+          childSize.height -
+          _selectorScreenPadding -
+          padding.bottom;
+    }
+
+    return Offset(x, y);
+  }
+
+  @override
+  bool shouldRelayout(_SelectorLayout oldDelegate) {
+    return position != oldDelegate.position ||
+        textDirection != oldDelegate.textDirection ||
+        padding != oldDelegate.padding ||
+        !setEquals(avoidBounds, oldDelegate.avoidBounds);
   }
 }

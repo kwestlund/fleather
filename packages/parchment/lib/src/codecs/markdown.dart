@@ -1,10 +1,6 @@
-// Copyright (c) 2018, the Zefyr project authors.  Please see the AUTHORS file
-// for details. All rights reserved. Use of this source code is governed by a
-// BSD-style license that can be found in the LICENSE file.
-
 import 'dart:convert';
 
-import 'package:quill_delta/quill_delta.dart';
+import 'package:parchment_delta/parchment_delta.dart';
 
 import '../document/attributes.dart';
 import '../document.dart';
@@ -39,11 +35,10 @@ class _ParchmentMarkdownDecoder extends Converter<String, ParchmentDocument> {
     r'(`(?<inline_code_text>.+?)`)',
   );
 
-  // as per https://www.michaelperrin.fr/blog/2019/02/advanced-regular-expressions
-  static final _linkRegExp =
-      RegExp(r'\[(?<text>.+)\]\((?<url>[^ ]+)(?: "(?<title>.+)")?\)');
+  static final _linkRegExp = RegExp(r'\[(.+?)\]\(([^)]+)\)');
   static final _ulRegExp = RegExp(r'^( *)\* +(.*)');
   static final _olRegExp = RegExp(r'^( *)\d+[.)] +(.*)');
+  static final _clRegExp = RegExp(r'^( *)- +\[( |x|X)\] +(.*)');
   static final _bqRegExp = RegExp(r'^> *(.*)');
   static final _codeRegExpTag = RegExp(r'^( *)```');
 
@@ -105,7 +100,8 @@ class _ParchmentMarkdownDecoder extends Converter<String, ParchmentDocument> {
     }
 
     if (_handleOrderedList(line, delta, style) ||
-        _handleUnorderedList(line, delta, style)) {
+        _handleUnorderedList(line, delta, style) ||
+        _handleCheckList(line, delta, style)) {
       return true;
     }
 
@@ -157,6 +153,31 @@ class _ParchmentMarkdownDecoder extends Converter<String, ParchmentDocument> {
 
     final match = _ulRegExp.matchAsPrefix(line);
     final span = match?.group(2);
+    if (span != null) {
+      _handleSpan(span, delta, false,
+          ParchmentStyle().putAll(newStyle.inlineAttributes));
+      _handleSpan(
+          '\n', delta, false, ParchmentStyle().putAll(newStyle.lineAttributes));
+      return true;
+    }
+    return false;
+  }
+
+  bool _handleCheckList(String line, Delta delta, [ParchmentStyle? style]) {
+    // we do not support nested blocks
+    if (style?.contains(ParchmentAttribute.block) ?? false) {
+      return false;
+    }
+
+    ParchmentStyle newStyle =
+        (style ?? ParchmentStyle()).put(ParchmentAttribute.cl);
+
+    final match = _clRegExp.matchAsPrefix(line);
+    final span = match?.group(3);
+    final isChecked = match?.group(2) != ' ';
+    if (isChecked) {
+      newStyle = newStyle.put(ParchmentAttribute.checked);
+    }
     if (span != null) {
       _handleSpan(span, delta, false,
           ParchmentStyle().putAll(newStyle.inlineAttributes));
@@ -415,6 +436,16 @@ class _ParchmentMarkdownEncoder extends Converter<ParchmentDocument, String> {
       for (final lineNode in node.children) {
         if (node.style.containsSame(ParchmentAttribute.ol)) {
           lineBuffer.write(currentItemOrder);
+        } else if (node.style.containsSame(ParchmentAttribute.cl)) {
+          lineBuffer.write('- [');
+          if ((lineNode as LineNode)
+              .style
+              .contains(ParchmentAttribute.checked)) {
+            lineBuffer.write('X');
+          } else {
+            lineBuffer.write(' ');
+          }
+          lineBuffer.write('] ');
         }
         handleLine(lineNode as LineNode);
         if (!lineNode.isLast) {
@@ -458,6 +489,8 @@ class _ParchmentMarkdownEncoder extends Converter<ParchmentDocument, String> {
     } else if (attribute?.key == ParchmentAttribute.block.key) {
       _writeBlockTag(buffer, attribute as ParchmentAttribute<String>,
           close: close);
+    } else if (attribute?.key == ParchmentAttribute.checked.key) {
+      // no-op
     } else {
       throw ArgumentError('Cannot handle $attribute');
     }
@@ -505,7 +538,9 @@ class _ParchmentMarkdownEncoder extends Converter<ParchmentDocument, String> {
       if (close) return; // no close tag needed for simple blocks.
 
       final tag = simpleBlocks[block];
-      buffer.write(tag);
+      if (tag != null) {
+        buffer.write(tag);
+      }
     }
   }
 }

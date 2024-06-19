@@ -1,11 +1,13 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 
-import 'package:fleather/fleather.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:parchment/parchment.dart';
+
+import 'editor.dart';
 
 mixin RawEditorStateTextInputClientMixin on EditorState
     implements DeltaTextInputClient {
@@ -49,25 +51,32 @@ mixin RawEditorStateTextInputClientMixin on EditorState
 
     if (!hasConnection) {
       _lastKnownRemoteTextEditingValue = textEditingValue;
-      _textInputConnection = TextInput.attach(
-        this,
-        TextInputConfiguration(
-          inputType: TextInputType.multiline,
-          readOnly: widget.readOnly,
-          obscureText: false,
-          autocorrect: false,
-          enableDeltaModel: true,
-          inputAction: TextInputAction.newline,
-          keyboardAppearance: widget.keyboardAppearance,
-          textCapitalization: widget.textCapitalization,
-        ),
-      );
+      _textInputConnection = TextInput.attach(this, _configuration);
 
       _updateSizeAndTransform();
       _textInputConnection!.setEditingState(_lastKnownRemoteTextEditingValue!);
     }
     _textInputConnection!.show();
   }
+
+  void updateConnectionConfig() {
+    if (hasConnection) {
+      _textInputConnection!.updateConfig(_configuration);
+    }
+  }
+
+  TextInputConfiguration get _configuration => TextInputConfiguration(
+        inputType: TextInputType.multiline,
+        readOnly: widget.readOnly,
+        obscureText: false,
+        enableDeltaModel: true,
+        autocorrect: widget.autocorrect,
+        enableSuggestions: widget.enableSuggestions,
+        inputAction: TextInputAction.newline,
+        enableInteractiveSelection: widget.enableInteractiveSelection,
+        keyboardAppearance: widget.keyboardAppearance,
+        textCapitalization: widget.textCapitalization,
+      );
 
   /// Closes input connection if it's currently open. Otherwise does nothing.
   void closeConnectionIfNeeded() {
@@ -93,7 +102,7 @@ mixin RawEditorStateTextInputClientMixin on EditorState
     // with the last known remote value.
     // It is important to prevent excessive remote updates as it can cause
     // race conditions.
-    final actualValue = value.copyWith(
+    var actualValue = value.copyWith(
       composing: _lastKnownRemoteTextEditingValue?.composing,
     );
 
@@ -105,8 +114,28 @@ mixin RawEditorStateTextInputClientMixin on EditorState
       performSpellCheck(value.text);
     }
 
+    // This is to prevent sending an editing state with invalid composing range
+    // to engine.
+    // TODO: Maybe it's better to also include composing range in controller?
+    // Actions like [_DeleteTextAction] are using controller's editing value
+    // to update remote value.
+    // See https://github.com/fleather-editor/fleather/issues/259#issuecomment-2032404450
+    if (actualValue.composing != TextRange.empty &&
+        !actualValue.isComposingRangeValid) {
+      actualValue = actualValue.copyWith(composing: TextRange.empty);
+    }
+
     _lastKnownRemoteTextEditingValue = actualValue;
     _textInputConnection!.setEditingState(actualValue);
+  }
+
+  /// Update cached remote value with selection
+  ///
+  /// This is used for macOS when hitting arrow down when the cursor is already at the end
+  /// of the document. If not updated, cursor position is not in sync with remote
+  void updateLastKnownWithSelection(TextSelection selection) {
+    _lastKnownRemoteTextEditingValue =
+        _lastKnownRemoteTextEditingValue?.copyWith(selection: selection);
   }
 
   void updateTextInputConnectionStyle([TextPosition? position]) {

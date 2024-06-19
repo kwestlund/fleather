@@ -1,8 +1,8 @@
 import 'package:collection/collection.dart';
-import 'package:fleather/util.dart';
 import 'package:flutter/material.dart';
 import 'package:parchment/parchment.dart';
 
+import '../../util.dart';
 import '../rendering/editable_text_block.dart';
 import 'checkbox.dart';
 import 'controller.dart';
@@ -165,7 +165,7 @@ class EditableTextBlock extends StatelessWidget {
 
       leadingWidgets.add(_NumberPoint(
         number: currentIndex + 1,
-        style: theme.paragraph.style,
+        style: theme.lists.style,
         width: 32.0,
         padding: 8.0,
       ));
@@ -321,6 +321,8 @@ class _NumberPoint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      // Empirically, depending on height of the style, we need to
+      // align at top or at bottom
       alignment: AlignmentDirectional.topEnd,
       width: width,
       padding: EdgeInsetsDirectional.only(end: padding),

@@ -1,11 +1,8 @@
-// Copyright (c) 2018, the Zefyr project authors.  Please see the AUTHORS file
-// for details. All rights reserved. Use of this source code is governed by a
-// BSD-style license that can be found in the LICENSE file.
 import 'package:fake_async/fake_async.dart';
 import 'package:fleather/fleather.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:quill_delta/quill_delta.dart';
+import 'package:parchment_delta/parchment_delta.dart';
 
 void main() {
   group('$FleatherController', () {
@@ -129,6 +126,33 @@ void main() {
       // expect(controller.lastChangeSource, ChangeSource.local);
     });
 
+    test('Toggleable styles', () {
+      controller.formatText(0, 0, ParchmentAttribute.bold);
+      controller.formatText(0, 0, ParchmentAttribute.italic);
+      controller.formatText(0, 0, ParchmentAttribute.underline);
+      controller.formatText(0, 0, ParchmentAttribute.strikethrough);
+      controller.formatText(0, 0, ParchmentAttribute.inlineCode);
+      controller.formatText(0, 0,
+          ParchmentAttribute.backgroundColor.withColor(Colors.black.value));
+      controller.formatText(0, 0,
+          ParchmentAttribute.foregroundColor.withColor(Colors.black.value));
+      expect(
+          controller.toggledStyles,
+          ParchmentStyle.fromJson({
+            ...ParchmentAttribute.bold.toJson(),
+            ...ParchmentAttribute.italic.toJson(),
+            ...ParchmentAttribute.underline.toJson(),
+            ...ParchmentAttribute.strikethrough.toJson(),
+            ...ParchmentAttribute.inlineCode.toJson(),
+            ...ParchmentAttribute.backgroundColor
+                .withColor(Colors.black.value)
+                .toJson(),
+            ...ParchmentAttribute.foregroundColor
+                .withColor(Colors.black.value)
+                .toJson(),
+          }));
+    });
+
     test('replaceText only applies toggled styles to non new line parts', () {
       controller.replaceText(0, 0, 'Words');
       controller.formatText(2, 0, ParchmentAttribute.bold);
@@ -221,6 +245,15 @@ void main() {
 
       final result = controller.getSelectionStyle();
       expect(result.values, [ParchmentAttribute.bold]);
+    });
+
+    test('getSelectionStyle at start of a new line', () {
+      controller.replaceText(0, 0, 'Heading');
+      controller.formatText(0, 7, ParchmentAttribute.bold);
+      controller.replaceText(7, 0, '\n');
+      controller.updateSelection(const TextSelection.collapsed(offset: 8));
+      final result = controller.getSelectionStyle();
+      expect(result.values, []);
     });
 
     test('preserve inline format when replacing text from the first character',

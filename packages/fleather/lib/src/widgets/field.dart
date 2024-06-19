@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:parchment/parchment.dart';
 
+import '../services/clipboard_manager.dart';
 import 'controller.dart';
 import 'editor.dart';
 
@@ -63,6 +64,20 @@ class FleatherField extends StatefulWidget {
   ///
   /// Defaults to `false`. Must not be `null`.
   final bool readOnly;
+
+  /// Whether to enable autocorrection.
+  ///
+  /// Defaults to `true`.
+  final bool autocorrect;
+
+  /// Whether to show input suggestions as the user types.
+  ///
+  /// This flag only affects Android. On iOS, suggestions are tied directly to
+  /// [autocorrect], so that suggestions are only shown when [autocorrect] is
+  /// true. On Android autocorrection and suggestion are controlled separately.
+  ///
+  /// Defaults to true.
+  final bool enableSuggestions;
 
   /// Whether to enable user interface affordances for changing the
   /// text selection.
@@ -155,6 +170,12 @@ class FleatherField extends StatefulWidget {
   /// Defaults to [defaultContextMenuBuilder].
   final FleatherContextMenuBuilder contextMenuBuilder;
 
+  /// Provides clipboard status and getter and setter for clipboard data
+  /// for paste, copy and cut functionality.
+  ///
+  /// Defaults to [PlainTextClipboardManager]
+  final ClipboardManager clipboardManager;
+
   final GlobalKey<EditorState>? editorKey;
 
   const FleatherField({
@@ -168,6 +189,8 @@ class FleatherField extends StatefulWidget {
     this.autofocus = false,
     this.showCursor = true,
     this.readOnly = false,
+    this.autocorrect = true,
+    this.enableSuggestions = true,
     this.enableInteractiveSelection = true,
     this.minHeight,
     this.maxHeight,
@@ -181,6 +204,7 @@ class FleatherField extends StatefulWidget {
     this.contextMenuBuilder = defaultContextMenuBuilder,
     this.spellCheckConfiguration,
     this.embedBuilder = defaultFleatherEmbedBuilder,
+    this.clipboardManager = const PlainTextClipboardManager(),
   });
 
   @override
@@ -237,6 +261,8 @@ class _FleatherFieldState extends State<FleatherField> {
       autofocus: widget.autofocus,
       showCursor: widget.showCursor,
       readOnly: widget.readOnly,
+      autocorrect: widget.autocorrect,
+      enableSuggestions: widget.enableSuggestions,
       enableInteractiveSelection: widget.enableInteractiveSelection,
       minHeight: widget.minHeight,
       maxHeight: widget.maxHeight,
@@ -248,6 +274,7 @@ class _FleatherFieldState extends State<FleatherField> {
       embedBuilder: widget.embedBuilder,
       spellCheckConfiguration: widget.spellCheckConfiguration,
       contextMenuBuilder: widget.contextMenuBuilder,
+      clipboardManager: widget.clipboardManager,
     );
 
     if (widget.toolbar != null) {

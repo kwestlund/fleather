@@ -1,9 +1,9 @@
 import 'dart:math';
 
-import 'package:fleather/util.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/rendering.dart';
 
+import '../fast_diff.dart';
 import 'editor.dart';
 
 mixin RawEditorStateSelectionDelegateMixin on EditorState
@@ -97,9 +97,7 @@ mixin RawEditorStateSelectionDelegateMixin on EditorState
 
   @override
   bool get pasteEnabled =>
-      !widget.readOnly &&
-      (clipboardStatus == null ||
-          clipboardStatus?.value == ClipboardStatus.pasteable);
+      !widget.readOnly && clipboardStatus.value == ClipboardStatus.pasteable;
 
   @override
   bool get selectAllEnabled => widget.enableInteractiveSelection;

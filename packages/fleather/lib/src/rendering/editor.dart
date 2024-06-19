@@ -186,7 +186,7 @@ class RenderEditor extends RenderEditableContainerBox
     markNeedsSemanticsUpdate();
   }
 
-  Offset get _paintOffset => Offset(0.0, -(offset?.pixels ?? 0.0));
+  Offset get paintOffset => Offset(0.0, -(offset?.pixels ?? 0.0));
 
   ViewportOffset? get offset => _offset;
   ViewportOffset? _offset;
@@ -350,11 +350,15 @@ class RenderEditor extends RenderEditableContainerBox
           offsetInViewport;
       final caretBottom =
           endpoints.single.point.dy + kMargin + offsetInViewport;
+      final caretHeight = caretBottom - caretTop;
       double? dy;
-      if (caretTop < scrollOffset) {
-        dy = caretTop;
-      } else if (caretBottom > scrollOffset + viewportHeight) {
+
+      /// When caret is bigger than viewport, we reveal it's bottom.
+      if (caretBottom > scrollOffset + viewportHeight ||
+          caretHeight > viewportHeight) {
         dy = caretBottom - viewportHeight;
+      } else if (caretTop < scrollOffset) {
+        dy = caretTop;
       }
       if (dy == null) return null;
       // Clamping to 0.0 so that the content does not jump unnecessarily.
@@ -629,7 +633,7 @@ class RenderEditor extends RenderEditableContainerBox
       _paintFloatingCursor(context, offset);
     }
     defaultPaint(context, offset);
-    _updateSelectionExtentsVisibility(offset + _paintOffset);
+    _updateSelectionExtentsVisibility(offset + paintOffset);
     _paintHandleLayers(context, getEndpointsForSelection(selection));
 
     if (hasFocus &&
@@ -881,7 +885,10 @@ class RenderEditor extends RenderEditableContainerBox
         final caretOffset = child.getOffsetForCaret(localPosition);
         final testPosition = TextPosition(offset: sibling.node.length - 1);
         final testOffset = sibling.getOffsetForCaret(testPosition);
-        final finalOffset = Offset(caretOffset.dx, testOffset.dy);
+        // The addition of 1 point to testOffset.dy is added because somehow
+        // in Flutter 3.22 the TextPainter is yielding wrong text position
+        // for the offset (1 line above the correct line).
+        final finalOffset = Offset(caretOffset.dx, testOffset.dy + 1);
         final siblingPosition = sibling.getPositionForOffset(finalOffset);
         newPosition = TextPosition(
             offset: sibling.node.documentOffset + siblingPosition.offset);

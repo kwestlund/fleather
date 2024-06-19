@@ -2,21 +2,23 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
-import 'package:fleather/util.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:parchment/parchment.dart';
-import 'package:quill_delta/quill_delta.dart';
+import 'package:parchment_delta/parchment_delta.dart';
 
+import '../../util.dart';
 import 'autoformats.dart';
 import 'history.dart';
 
 /// List of style keys which can be toggled for insertion
-List<String> _insertionToggleableStyleKeys = [
+List<String> _toggleableStyleKeys = [
   ParchmentAttribute.bold.key,
   ParchmentAttribute.italic.key,
   ParchmentAttribute.underline.key,
   ParchmentAttribute.strikethrough.key,
   ParchmentAttribute.inlineCode.key,
+  ParchmentAttribute.backgroundColor.key,
+  ParchmentAttribute.foregroundColor.key,
 ];
 
 class FleatherController extends ChangeNotifier {
@@ -61,13 +63,21 @@ class FleatherController extends ChangeNotifier {
   /// If nothing is selected but we've toggled an attribute,
   /// we also merge those in our style before returning.
   ParchmentStyle getSelectionStyle() {
-    final start = _selection.start;
+    int start = _selection.start;
     final length = _selection.end - start;
 
-    final effectiveStart =
-        _selection.isCollapsed ? math.max(0, start - 1) : start;
+    // We decrement the start position to collect styles
+    // before current selection position if selection is collaped and
+    // it's not on the beginning of a new line.
+    if (length == 0 && start > 0) {
+      final data = document.toDelta().slice(start - 1, start).first.data;
+      if (data is String && !data.endsWith('\n')) {
+        start = start - 1;
+      }
+    }
+
     final inlineAttributes =
-        document.collectStyle(effectiveStart, length).inlineAttributes;
+        document.collectStyle(start, length).inlineAttributes;
     final lineAttributes = document.collectStyle(start, length).lineAttributes;
 
     return ParchmentStyle()
@@ -196,7 +206,7 @@ class FleatherController extends ChangeNotifier {
     // _lastChangeSource = ChangeSource.local;
     const source = ChangeSource.local;
 
-    if (length == 0 && _insertionToggleableStyleKeys.contains(attribute.key)) {
+    if (length == 0 && _toggleableStyleKeys.contains(attribute.key)) {
       // Add the attribute to our toggledStyle. It will be used later upon insertion.
       _toggledStyles = toggledStyles.put(attribute);
     }
@@ -239,8 +249,16 @@ class FleatherController extends ChangeNotifier {
   /// can be composed without errors.
   ///
   /// If composing this change fails then this method throws [ComposeError].
-  void compose(Delta change,
-      {TextSelection? selection, ChangeSource source = ChangeSource.remote}) {
+  ///
+  /// If selection is not provided, new selection will be inferred with priority
+  /// to current position which can be changed by setting [forceUpdateSelection]
+  /// to true.
+  void compose(
+    Delta change, {
+    TextSelection? selection,
+    ChangeSource source = ChangeSource.remote,
+    bool forceUpdateSelection = false,
+  }) {
     if (change.isNotEmpty) {
       document.compose(change, source);
       if (source != ChangeSource.history) {
@@ -250,12 +268,10 @@ class FleatherController extends ChangeNotifier {
     if (selection != null) {
       _updateSelectionSilent(selection, source: source);
     } else {
-      // Transform selection against the composed change and give priority to
-      // current position (force: false).
-      final base =
-          change.transformPosition(_selection.baseOffset, force: false);
-      final extent =
-          change.transformPosition(_selection.extentOffset, force: false);
+      final base = change.transformPosition(_selection.baseOffset,
+          force: forceUpdateSelection);
+      final extent = change.transformPosition(_selection.extentOffset,
+          force: forceUpdateSelection);
       selection = _selection.copyWith(baseOffset: base, extentOffset: extent);
       if (_selection != selection) {
         _updateSelectionSilent(selection, source: source);

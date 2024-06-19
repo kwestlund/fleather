@@ -1,14 +1,10 @@
-// Copyright (c) 2018, the Zefyr project authors.  Please see the AUTHORS file
-// for details. All rights reserved. Use of this source code is governed by a
-// BSD-style license that can be found in the LICENSE file.
-
 import 'package:fleather/fleather.dart';
 import 'package:fleather/src/widgets/editor_input_client_mixin.dart';
 import 'package:fleather/src/widgets/text_selection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:quill_delta/quill_delta.dart';
+import 'package:parchment_delta/parchment_delta.dart';
 
 var delta = Delta()..insert('This House Is A Circus\n');
 
@@ -19,7 +15,9 @@ class EditorSandBox {
     ParchmentDocument? document,
     FleatherThemeData? fleatherTheme,
     bool autofocus = false,
+    bool enableSelectionInteraction = true,
     FakeSpellCheckService? spellCheckService,
+    ClipboardManager clipboardManager = const PlainTextClipboardManager(),
     FleatherEmbedBuilder embedBuilder = defaultFleatherEmbedBuilder,
   }) {
     focusNode ??= FocusNode();
@@ -30,8 +28,10 @@ class EditorSandBox {
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
+      enableSelectionInteraction: enableSelectionInteraction,
       spellCheckService: spellCheckService,
       embedBuilder: embedBuilder,
+      clipboardManager: clipboardManager,
     );
 
     if (fleatherTheme != null) {
@@ -141,15 +141,19 @@ class _FleatherSandbox extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     this.autofocus = false,
+    this.enableSelectionInteraction = true,
     this.spellCheckService,
     this.embedBuilder = defaultFleatherEmbedBuilder,
+    this.clipboardManager = const PlainTextClipboardManager(),
   });
 
   final FleatherController controller;
   final FocusNode focusNode;
   final bool autofocus;
+  final bool enableSelectionInteraction;
   final FakeSpellCheckService? spellCheckService;
   final FleatherEmbedBuilder embedBuilder;
+  final ClipboardManager clipboardManager;
 
   @override
   _FleatherSandboxState createState() => _FleatherSandboxState();
@@ -162,10 +166,12 @@ class _FleatherSandboxState extends State<_FleatherSandbox> {
   Widget build(BuildContext context) {
     return Material(
       child: FleatherField(
+        clipboardManager: widget.clipboardManager,
         embedBuilder: widget.embedBuilder,
         controller: widget.controller,
         focusNode: widget.focusNode,
         readOnly: !_enabled,
+        enableInteractiveSelection: widget.enableSelectionInteraction,
         autofocus: widget.autofocus,
         spellCheckConfiguration: widget.spellCheckService != null
             ? SpellCheckConfiguration(
@@ -177,9 +183,7 @@ class _FleatherSandboxState extends State<_FleatherSandbox> {
   }
 
   void disable() {
-    setState(() {
-      _enabled = false;
-    });
+    setState(() => _enabled = false);
   }
 }
 
@@ -188,10 +192,15 @@ class TestUpdateWidget extends StatefulWidget {
       {super.key,
       required this.focusNodeAfterChange,
       this.testField = false,
-      this.document});
+      this.toolbarBuilder,
+      this.controller,
+      this.document})
+      : assert((toolbarBuilder != null) == (controller != null));
 
   final FocusNode focusNodeAfterChange;
   final bool testField;
+  final FleatherController? controller;
+  final WidgetBuilder? toolbarBuilder;
   final ParchmentDocument? document;
 
   @override
@@ -210,13 +219,16 @@ class TestUpdateWidgetState extends State<TestUpdateWidget> {
                 setState(() => focusNode = widget.focusNodeAfterChange),
             child: const Text('Change state'),
           ),
+          if (widget.toolbarBuilder != null) widget.toolbarBuilder!(context),
           widget.testField
               ? FleatherField(
-                  controller: FleatherController(document: widget.document),
+                  controller: widget.controller ??
+                      FleatherController(document: widget.document),
                   focusNode: focusNode,
                 )
               : FleatherEditor(
-                  controller: FleatherController(document: widget.document),
+                  controller: widget.controller ??
+                      FleatherController(document: widget.document),
                   focusNode: focusNode,
                 ),
         ],

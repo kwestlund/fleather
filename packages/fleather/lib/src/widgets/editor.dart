@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:math';
 
-import 'package:fleather/src/services/spell_check_suggestions_toolbar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -12,9 +11,12 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
 import 'package:parchment/parchment.dart';
+import 'package:parchment_delta/parchment_delta.dart';
 
 import '../../util.dart';
 import '../rendering/editor.dart';
+import '../services/clipboard_manager.dart';
+import '../services/spell_check_suggestions_toolbar.dart';
 import 'baseline_proxy.dart';
 import 'controller.dart';
 import 'cursor.dart';
@@ -30,6 +32,14 @@ import 'single_child_scroll_view.dart';
 import 'text_line.dart';
 import 'text_selection.dart';
 import 'theme.dart';
+
+class _WebClipboardStatusNotifier extends ClipboardStatusNotifier {
+  @override
+  ClipboardStatus value = ClipboardStatus.pasteable;
+
+  @override
+  Future<void> update() => Future<void>.value();
+}
 
 /// Widget builder function for context menu in [FleatherEditor].
 typedef FleatherContextMenuBuilder = Widget Function(
@@ -73,11 +83,12 @@ typedef FleatherEmbedBuilder = Widget Function(
 /// Only supports "horizontal rule" embeds.
 Widget defaultFleatherEmbedBuilder(BuildContext context, EmbedNode node) {
   if (node.value.type == 'hr') {
-    final theme = FleatherTheme.of(context)!;
+    final fleatherThemeData = FleatherTheme.of(context)!;
+
     return Divider(
-      height: theme.paragraph.style.fontSize! * theme.paragraph.style.height!,
-      thickness: 2,
-      color: Colors.grey.shade200,
+      height: fleatherThemeData.horizontalRule.height,
+      thickness: fleatherThemeData.horizontalRule.thickness,
+      color: fleatherThemeData.horizontalRule.color,
     );
   }
   throw UnimplementedError(
@@ -146,6 +157,20 @@ class FleatherEditor extends StatefulWidget {
   ///
   /// Defaults to `false`. Must not be `null`.
   final bool readOnly;
+
+  /// Whether to enable autocorrection.
+  ///
+  /// Defaults to `true`.
+  final bool autocorrect;
+
+  /// Whether to show input suggestions as the user types.
+  ///
+  /// This flag only affects Android. On iOS, suggestions are tied directly to
+  /// [autocorrect], so that suggestions are only shown when [autocorrect] is
+  /// true. On Android autocorrection and suggestion are controlled separately.
+  ///
+  /// Defaults to true.
+  final bool enableSuggestions;
 
   /// Whether to enable user interface affordances for changing the
   /// text selection.
@@ -256,6 +281,12 @@ class FleatherEditor extends StatefulWidget {
   /// Material [ListTile]s.
   final LinkActionPickerDelegate linkActionPickerDelegate;
 
+  /// Provides clipboard status and getter and setter for clipboard data
+  /// for paste, copy and cut functionality.
+  ///
+  /// Defaults to [PlainTextClipboardManager]
+  final ClipboardManager clipboardManager;
+
   final GlobalKey<EditorState>? editorKey;
 
   const FleatherEditor({
@@ -269,6 +300,8 @@ class FleatherEditor extends StatefulWidget {
     this.autofocus = false,
     this.showCursor = true,
     this.readOnly = false,
+    this.autocorrect = true,
+    this.enableSuggestions = true,
     this.enableInteractiveSelection = true,
     this.minHeight,
     this.maxHeight,
@@ -279,6 +312,7 @@ class FleatherEditor extends StatefulWidget {
     this.scrollPhysics,
     this.onLaunchUrl,
     this.spellCheckConfiguration,
+    this.clipboardManager = const PlainTextClipboardManager(),
     this.contextMenuBuilder = defaultContextMenuBuilder,
     this.embedBuilder = defaultFleatherEmbedBuilder,
     this.linkActionPickerDelegate = defaultLinkActionPickerDelegate,
@@ -291,6 +325,8 @@ class FleatherEditor extends StatefulWidget {
 class _FleatherEditorState extends State<FleatherEditor>
     implements EditorTextSelectionGestureDetectorBuilderDelegate {
   GlobalKey<EditorState>? _editorKey;
+
+  bool _showSelectionHandles = false;
 
   @override
   GlobalKey<EditorState> get editableTextKey => widget.editorKey ?? _editorKey!;
@@ -326,10 +362,42 @@ class _FleatherEditorState extends State<FleatherEditor>
         _FleatherEditorSelectionGestureDetectorBuilder(state: this);
   }
 
-  static const Set<TargetPlatform> _mobilePlatforms = {
-    TargetPlatform.iOS,
-    TargetPlatform.android
-  };
+  void _handleSelectionChanged(
+      TextSelection selection, SelectionChangedCause? cause) {
+    final bool willShowSelectionHandles = _shouldShowSelectionHandles(cause);
+    if (willShowSelectionHandles != _showSelectionHandles) {
+      setState(() {
+        _showSelectionHandles = willShowSelectionHandles;
+      });
+    }
+  }
+
+  bool _shouldShowSelectionHandles(SelectionChangedCause? cause) {
+    // When the editor is activated by something that doesn't trigger the
+    // selection overlay, we shouldn't show the handles either.
+    if (!_selectionGestureDetectorBuilder.shouldShowSelectionToolbar) {
+      return false;
+    }
+
+    if (cause == SelectionChangedCause.keyboard) {
+      return false;
+    }
+
+    if (widget.readOnly && widget.controller.selection.isCollapsed) {
+      return false;
+    }
+
+    if (cause == SelectionChangedCause.longPress ||
+        cause == SelectionChangedCause.scribble) {
+      return true;
+    }
+
+    if (widget.controller.document.toPlainText().length > 2) {
+      return true;
+    }
+
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -344,7 +412,6 @@ class _FleatherEditorState extends State<FleatherEditor>
     Color selectionColor;
     Radius? cursorRadius;
 
-    final showSelectionHandles = _mobilePlatforms.contains(theme.platform);
     final keyboardAppearance = widget.keyboardAppearance ?? theme.brightness;
 
     switch (theme.platform) {
@@ -403,8 +470,10 @@ class _FleatherEditorState extends State<FleatherEditor>
       scrollable: widget.scrollable,
       padding: widget.padding,
       autofocus: widget.autofocus,
+      autocorrect: widget.autocorrect,
       showCursor: widget.showCursor,
       readOnly: widget.readOnly,
+      enableSuggestions: widget.enableSuggestions,
       enableInteractiveSelection: widget.enableInteractiveSelection,
       minHeight: widget.minHeight,
       maxHeight: widget.maxHeight,
@@ -417,6 +486,7 @@ class _FleatherEditorState extends State<FleatherEditor>
       embedBuilder: widget.embedBuilder,
       spellCheckConfiguration: widget.spellCheckConfiguration,
       linkActionPickerDelegate: widget.linkActionPickerDelegate,
+      clipboardManager: widget.clipboardManager,
       // encapsulated fields below
       cursorStyle: CursorStyle(
         color: cursorColor,
@@ -428,7 +498,8 @@ class _FleatherEditorState extends State<FleatherEditor>
         opacityAnimates: cursorOpacityAnimates,
       ),
       selectionColor: selectionColor,
-      showSelectionHandles: showSelectionHandles,
+      showSelectionHandles: _showSelectionHandles,
+      onSelectionChanged: _handleSelectionChanged,
       selectionControls: textSelectionControls,
     );
 
@@ -441,10 +512,10 @@ class _FleatherEditorState extends State<FleatherEditor>
       ),
     );
 
-    return _selectionGestureDetectorBuilder.buildGestureDetector(
-      behavior: HitTestBehavior.translucent,
-      child: child,
-    );
+    return widget.enableInteractiveSelection
+        ? _selectionGestureDetectorBuilder.buildGestureDetector(
+            behavior: HitTestBehavior.translucent, child: child)
+        : child;
   }
 }
 
@@ -501,6 +572,8 @@ class RawEditor extends StatefulWidget {
     this.autofocus = false,
     bool? showCursor,
     this.readOnly = false,
+    this.autocorrect = true,
+    this.enableSuggestions = true,
     this.enableInteractiveSelection = true,
     this.minHeight,
     this.maxHeight,
@@ -512,8 +585,10 @@ class RawEditor extends StatefulWidget {
     required this.selectionColor,
     this.scrollPhysics,
     required this.cursorStyle,
+    required this.clipboardManager,
     this.showSelectionHandles = false,
     this.selectionControls,
+    this.onSelectionChanged,
     this.contextMenuBuilder = defaultContextMenuBuilder,
     this.spellCheckConfiguration,
     this.embedBuilder = defaultFleatherEmbedBuilder,
@@ -527,7 +602,6 @@ class RawEditor extends StatefulWidget {
               (maxHeight >= minHeight),
           'minHeight can\'t be greater than maxHeight',
         ),
-        // keyboardType = keyboardType ?? TextInputType.multiline,
         showCursor = showCursor ?? !readOnly;
 
   /// Controls the document being edited.
@@ -550,6 +624,20 @@ class RawEditor extends StatefulWidget {
   ///
   /// Defaults to false. Must not be null.
   final bool readOnly;
+
+  /// Whether to enable autocorrection.
+  ///
+  /// Defaults to `true`.
+  final bool autocorrect;
+
+  /// Whether to show input suggestions as the user types.
+  ///
+  /// This flag only affects Android. On iOS, suggestions are tied directly to
+  /// [autocorrect], so that suggestions are only shown when [autocorrect] is
+  /// true. On Android autocorrection and suggestion are controlled separately.
+  ///
+  /// Defaults to true.
+  final bool enableSuggestions;
 
   /// Callback which is triggered when the user wants to open a URL from
   /// a link in the document.
@@ -582,6 +670,10 @@ class RawEditor extends StatefulWidget {
   ///
   ///  * [showCursor], which controls the visibility of the cursor..
   final bool showSelectionHandles;
+
+  /// Called when the user changes the selection of text (including the cursor
+  /// location).
+  final SelectionChangedCallback? onSelectionChanged;
 
   /// Whether to show cursor.
   ///
@@ -682,6 +774,8 @@ class RawEditor extends StatefulWidget {
 
   final LinkActionPickerDelegate linkActionPickerDelegate;
 
+  final ClipboardManager clipboardManager;
+
   bool get selectionEnabled => enableInteractiveSelection;
 
   @override
@@ -725,7 +819,7 @@ abstract class EditorState extends State<RawEditor>
   @override
   bool searchWebEnabled = false;
 
-  ClipboardStatusNotifier? get clipboardStatus;
+  ClipboardStatusNotifier get clipboardStatus;
 
   ScrollController get scrollController;
 
@@ -831,8 +925,8 @@ class RawEditorState extends EditorState
   late AnimationController _floatingCursorResetController;
 
   @override
-  final ClipboardStatusNotifier? clipboardStatus =
-      kIsWeb ? null : ClipboardStatusNotifier();
+  final ClipboardStatusNotifier clipboardStatus =
+      kIsWeb ? _WebClipboardStatusNotifier() : ClipboardStatusNotifier();
   final LayerLink _toolbarLayerLink = LayerLink();
   final LayerLink _startHandleLayerLink = LayerLink();
   final LayerLink _endHandleLayerLink = LayerLink();
@@ -1104,15 +1198,15 @@ class RawEditorState extends EditorState
     return null;
   }
 
-  /// Copy current selection to [Clipboard].
+  /// Copy current selection to clipboard.
   @override
   void copySelection(SelectionChangedCause cause) {
     final TextSelection selection = textEditingValue.selection;
-    final String text = textEditingValue.text;
     if (selection.isCollapsed) {
       return;
     }
-    Clipboard.setData(ClipboardData(text: selection.textInside(text)));
+
+    _setClipboardData();
     if (cause == SelectionChangedCause.toolbar) {
       bringIntoView(textEditingValue.selection.extent);
       hideToolbar(false);
@@ -1139,18 +1233,17 @@ class RawEditorState extends EditorState
     }
   }
 
-  /// Cut current selection to [Clipboard].
+  /// Cut current selection to clipboard.
   @override
   void cutSelection(SelectionChangedCause cause) {
     if (widget.readOnly) {
       return;
     }
     final TextSelection selection = textEditingValue.selection;
-    final String text = textEditingValue.text;
     if (selection.isCollapsed) {
       return;
     }
-    Clipboard.setData(ClipboardData(text: selection.textInside(text)));
+    _setClipboardData();
     _replaceText(ReplaceTextIntent(textEditingValue, '', selection, cause));
     if (cause == SelectionChangedCause.toolbar) {
       bringIntoView(textEditingValue.selection.extent);
@@ -1158,7 +1251,17 @@ class RawEditorState extends EditorState
     }
   }
 
-  /// Paste text from [Clipboard].
+  void _setClipboardData() {
+    final TextSelection selection = textEditingValue.selection;
+    widget.clipboardManager.setData(FleatherClipboardData(
+      plainText: selection.textInside(textEditingValue.text),
+      delta: controller.document
+          .toDelta()
+          .slice(selection.baseOffset, selection.extentOffset),
+    ));
+  }
+
+  /// Paste text from clipboard.
   @override
   Future<void> pasteText(SelectionChangedCause cause) async {
     if (widget.readOnly) {
@@ -1170,13 +1273,24 @@ class RawEditorState extends EditorState
     }
     // Snapshot the input before using `await`.
     // See https://github.com/flutter/flutter/issues/11427
-    final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data == null) {
+    final data = await widget.clipboardManager.getData();
+    if (data == null || data.isEmpty) {
       return;
     }
 
-    _replaceText(
-        ReplaceTextIntent(textEditingValue, data.text!, selection, cause));
+    Delta pasteDelta = Delta();
+    pasteDelta.retain(selection.baseOffset);
+    pasteDelta.delete(selection.extentOffset - selection.baseOffset);
+
+    if (data.hasDelta) {
+      pasteDelta = pasteDelta.concat(data.delta!);
+    } else {
+      pasteDelta.insert(data.plainText!);
+    }
+
+    controller.compose(pasteDelta,
+        source: ChangeSource.local, forceUpdateSelection: true);
+
     if (cause == SelectionChangedCause.toolbar) {
       SchedulerBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -1232,7 +1346,7 @@ class RawEditorState extends EditorState
   void initState() {
     super.initState();
 
-    clipboardStatus?.addListener(_onChangedClipboardStatus);
+    clipboardStatus.addListener(_onChangedClipboardStatus);
 
     _spellCheckConfiguration =
         _inferSpellCheckConfiguration(widget.spellCheckConfiguration);
@@ -1338,6 +1452,13 @@ class RawEditorState extends EditorState
     } else {
       if (oldWidget.readOnly && _hasFocus) {
         openConnectionIfNeeded();
+      } else if (oldWidget.autocorrect != widget.autocorrect ||
+          oldWidget.enableSuggestions != widget.enableSuggestions ||
+          oldWidget.keyboardAppearance != widget.keyboardAppearance ||
+          oldWidget.textCapitalization != widget.textCapitalization ||
+          oldWidget.enableInteractiveSelection !=
+              widget.enableInteractiveSelection) {
+        updateConnectionConfig();
       }
     }
   }
@@ -1352,8 +1473,8 @@ class RawEditorState extends EditorState
     effectiveFocusNode.removeListener(_handleFocusChanged);
     _internalFocusNode?.dispose();
     _cursorController.dispose();
-    clipboardStatus?.removeListener(_onChangedClipboardStatus);
-    clipboardStatus?.dispose();
+    clipboardStatus.removeListener(_onChangedClipboardStatus);
+    clipboardStatus.dispose();
     _keyboardVisibilitySubscription?.cancel();
     super.dispose();
   }
@@ -1371,13 +1492,18 @@ class RawEditorState extends EditorState
       _cursorController.stopCursorTimer(resetCharTicks: false);
       _cursorController.startCursorTimer();
     }
-    _updateOrDisposeSelectionOverlayIfNeeded();
     setState(() {
       /*
        * We use widget.controller.value in build().
        * We need to run this before updating SelectionOverlay to ensure
        * that renderers are in line with the document.
        */
+    });
+    // When a new document node is added or removed due to a line/block
+    // insertion or deletion, we must wait for next frame the ensure the
+    // RenderEditor's child list reflects the new document node structure
+    SchedulerBinding.instance.addPersistentFrameCallback((timeStamp) {
+      _updateOrDisposeSelectionOverlayIfNeeded();
     });
     _verticalSelectionUpdateAction.stopCurrentVerticalRunIfSelectionChanges();
   }
@@ -1414,11 +1540,12 @@ class RawEditorState extends EditorState
         bringIntoView(selection.extent);
       }
     }
+
+    widget.onSelectionChanged?.call(selection, cause);
   }
 
   EditorTextSelectionOverlay _createSelectionOverlay() {
     return EditorTextSelectionOverlay(
-      clipboardStatus: clipboardStatus,
       context: context,
       value: textEditingValue,
       debugRequiredFor: widget,
@@ -1442,15 +1569,13 @@ class RawEditorState extends EditorState
     if (_hasFocus) {
       // Listen for changing viewInsets, which indicates keyboard showing up.
       WidgetsBinding.instance.addObserver(this);
+      _lastBottomViewInset = View.of(context).viewInsets.bottom;
       _showCaretOnScreen();
 //      _lastBottomViewInset = WidgetsBinding.instance.window.viewInsets.bottom;
 //      if (!_value.selection.isValid) {
       // Place cursor at the end if the selection is invalid when we receive focus.
 //        _handleSelectionChanged(TextSelection.collapsed(offset: _value.text.length), renderEditable, null);
 //      }
-      setState(() {
-        // Inform the widget that the value of focus has changed. (so that cursor can repaint appropriately)
-      });
     } else {
       WidgetsBinding.instance.removeObserver(this);
       // TODO: teach editor about state of the toolbar and whether the user is in the middle of applying styles.
@@ -1462,6 +1587,9 @@ class RawEditorState extends EditorState
       //     source: ChangeSource.local);
 //      _currentPromptRectRange = null;
     }
+    setState(() {
+      // Inform the widget that the value of focus has changed. (so that cursor can repaint appropriately)
+    });
     updateKeepAlive();
   }
 
@@ -1482,7 +1610,7 @@ class RawEditorState extends EditorState
 
   bool _showCaretOnScreenScheduled = false;
 
-  void _showCaretOnScreen() {
+  void _showCaretOnScreen([bool withAnimation = true]) {
     if (!widget.showCursor || _showCaretOnScreenScheduled) {
       return;
     }
@@ -1507,11 +1635,16 @@ class RawEditorState extends EditorState
       );
 
       if (offset != null) {
-        _scrollController.animateTo(
-          math.min(offset, _scrollController.position.maxScrollExtent),
-          duration: _caretAnimationDuration,
-          curve: _caretAnimationCurve,
-        );
+        if (withAnimation) {
+          _scrollController.animateTo(
+            math.min(offset, _scrollController.position.maxScrollExtent),
+            duration: _caretAnimationDuration,
+            curve: _caretAnimationCurve,
+          );
+        } else {
+          _scrollController.jumpTo(
+              math.min(offset, _scrollController.position.maxScrollExtent));
+        }
       }
     });
   }
@@ -1535,6 +1668,28 @@ class RawEditorState extends EditorState
       oldControl?.hide();
       newControl?.show();
     }
+  }
+
+  late double _lastBottomViewInset;
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (!mounted) {
+      return;
+    }
+    final bottomViewInset = View.of(context).viewInsets.bottom;
+    if (_lastBottomViewInset != bottomViewInset) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _selectionOverlay?.updateForScroll();
+      });
+      if (_lastBottomViewInset < bottomViewInset) {
+        // Because the metrics change signal from engine will come here every frame
+        // (on both iOS and Android). So we don't need to show caret with animation.
+        _showCaretOnScreen(false);
+      }
+    }
+    _lastBottomViewInset = bottomViewInset;
   }
 
   // On MacOS some actions are sent as selectors. We need to manually find the right Action and invoke it.
@@ -1938,21 +2093,24 @@ class RawEditorState extends EditorState
     final smallestLineHeight = math.min(baseLineHeight, extentLineHeight);
 
     return _textSelectionToolbarAnchorsFromSelection(
-        renderEditor: renderEditor,
         startGlyphHeight: smallestLineHeight,
         endGlyphHeight: smallestLineHeight,
         selectionEndpoints: endpoints);
   }
 
   TextSelectionToolbarAnchors _textSelectionToolbarAnchorsFromSelection({
-    required RenderEditor renderEditor,
     required double startGlyphHeight,
     required double endGlyphHeight,
     required List<TextSelectionPoint> selectionEndpoints,
   }) {
+    // If editor is scrollable, the editing region is only the viewport
+    // otherwise use editor as editing region
+    final viewport = RenderAbstractViewport.maybeOf(renderEditor);
+    final visualSizeRenderer = (viewport ?? renderEditor) as RenderBox;
     final Rect editingRegion = Rect.fromPoints(
-      renderEditor.localToGlobal(Offset.zero),
-      renderEditor.localToGlobal(renderEditor.size.bottomRight(Offset.zero)),
+      visualSizeRenderer.localToGlobal(Offset.zero),
+      visualSizeRenderer
+          .localToGlobal(visualSizeRenderer.size.bottomRight(Offset.zero)),
     );
 
     if (editingRegion.left.isNaN ||
@@ -1969,12 +2127,21 @@ class RawEditorState extends EditorState
     final Rect selectionRect = Rect.fromLTRB(
       isMultiline
           ? editingRegion.left
-          : editingRegion.left + selectionEndpoints.first.point.dx,
-      editingRegion.top + selectionEndpoints.first.point.dy - startGlyphHeight,
+          : editingRegion.left +
+              selectionEndpoints.first.point.dx +
+              renderEditor.paintOffset.dx,
+      editingRegion.top +
+          selectionEndpoints.first.point.dy +
+          renderEditor.paintOffset.dy -
+          startGlyphHeight,
       isMultiline
           ? editingRegion.right
-          : editingRegion.left + selectionEndpoints.last.point.dx,
-      editingRegion.top + selectionEndpoints.last.point.dy,
+          : editingRegion.left +
+              selectionEndpoints.last.point.dx +
+              renderEditor.paintOffset.dx,
+      editingRegion.top +
+          selectionEndpoints.last.point.dy +
+          renderEditor.paintOffset.dy,
     );
 
     return TextSelectionToolbarAnchors(
@@ -1995,7 +2162,7 @@ class RawEditorState extends EditorState
   @override
   List<ContextMenuButtonItem> get contextMenuButtonItems {
     return EditableText.getEditableButtonItems(
-        clipboardStatus: clipboardStatus?.value,
+        clipboardStatus: clipboardStatus.value,
         onCopy: copyEnabled
             ? () => copySelection(SelectionChangedCause.toolbar)
             : null,
@@ -2578,11 +2745,22 @@ class _UpdateTextSelectionVerticallyAction<
             : intent.forward
                 ? currentRun.moveNext()
                 : currentRun.movePrevious();
-    final TextPosition newExtent = shouldMove
-        ? currentRun.current
-        : intent.forward
-            ? TextPosition(offset: state.textEditingValue.text.length)
-            : const TextPosition(offset: 0);
+
+    TextPosition computeNewExtent() {
+      if (shouldMove) return currentRun.current;
+
+      if (intent.forward) {
+        if (collapseSelection) {
+          state.updateLastKnownWithSelection(TextSelection.collapsed(
+              offset: state.textEditingValue.text.length));
+        }
+        return TextPosition(offset: state.textEditingValue.text.length - 1);
+      }
+
+      return const TextPosition(offset: 0);
+    }
+
+    final TextPosition newExtent = computeNewExtent();
     final TextSelection newSelection = collapseSelection
         ? TextSelection.fromPosition(newExtent)
         : value.selection.extendTo(newExtent);

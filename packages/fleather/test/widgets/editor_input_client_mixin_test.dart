@@ -7,6 +7,55 @@ import 'package:flutter_test/flutter_test.dart';
 import '../testing.dart';
 
 void main() {
+  group('send text editing state to TextInputConnection', () {
+    final composingRanges = <TextRange>[];
+
+    void bind(WidgetTester tester) {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.textInput, (MethodCall methodCall) async {
+        if (methodCall.method == 'TextInput.setEditingState') {
+          final Map<String, dynamic> args =
+              methodCall.arguments as Map<String, dynamic>;
+          composingRanges.add(TextRange(
+              start: args['composingBase'], end: args['composingExtent']));
+        }
+        return null;
+      });
+    }
+
+    setUp(() => composingRanges.clear());
+
+    testWidgets(
+        'sends empty composing range if composing range becomes invalid',
+        (tester) async {
+      bind(tester);
+      final document = ParchmentDocument.fromJson([
+        {'insert': 'some text\n'}
+      ]);
+      final editor = EditorSandBox(tester: tester, document: document);
+      await editor.pump();
+      await editor.tap();
+      tester.binding.scheduleWarmUpFrame();
+      final editorState =
+          tester.state(find.byType(RawEditor)) as RawEditorState;
+      editorState.updateEditingValueWithDeltas([
+        TextEditingDeltaNonTextUpdate(
+          oldText: editorState.textEditingValue.text,
+          selection: const TextSelection.collapsed(offset: 9),
+          composing: const TextRange(start: 5, end: 9),
+        )
+      ]);
+      await tester.pumpAndSettle();
+      editor.controller.replaceText(4, 5, '',
+          selection: const TextSelection.collapsed(offset: 4));
+      await tester.pumpAndSettle(throttleDuration);
+      expect(
+          composingRanges.fold(
+              true, (v, e) => v && (e == TextRange.empty || e.isValid)),
+          isTrue);
+    });
+  });
+
   group('sets style to TextInputConnection', () {
     final log = <TextInputConnectionStyle>[];
 
@@ -248,5 +297,52 @@ void main() {
         log.clear();
       }
     });
+  });
+
+  testWidgets('send editor options to TextInputConnection', (tester) async {
+    Map<String, dynamic>? textInputSetClientProperties;
+    Map<String, dynamic>? textInputUpdateConfigProperties;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.textInput, (MethodCall methodCall) async {
+      if (methodCall.method == 'TextInput.setClient') {
+        textInputSetClientProperties = methodCall.arguments[1];
+      } else if (methodCall.method == 'TextInput.updateConfig') {
+        textInputUpdateConfigProperties = methodCall.arguments;
+      }
+      return null;
+    });
+
+    final controller = FleatherController();
+    Future<void> pumpEditor(bool enable) async {
+      final editor = MaterialApp(
+          home: FleatherField(
+        controller: controller,
+        enableSuggestions: enable,
+        autocorrect: enable,
+      ));
+      await tester.pumpWidget(editor);
+      await tester.tapAt(tester.getCenter(find.byType(RawEditor)));
+      tester.binding.scheduleWarmUpFrame();
+      await tester.pumpAndSettle();
+    }
+
+    await pumpEditor(true);
+    expect(textInputSetClientProperties?['autocorrect'], true);
+    expect(textInputSetClientProperties?['enableSuggestions'], true);
+    expect(textInputUpdateConfigProperties, isNull);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+
+    await pumpEditor(false);
+    expect(textInputSetClientProperties?['autocorrect'], false);
+    expect(textInputSetClientProperties?['enableSuggestions'], false);
+    expect(textInputUpdateConfigProperties, isNull);
+
+    textInputSetClientProperties = null;
+    await pumpEditor(true);
+    expect(textInputUpdateConfigProperties?['autocorrect'], true);
+    expect(textInputUpdateConfigProperties?['enableSuggestions'], true);
+    expect(textInputSetClientProperties, isNull);
   });
 }
