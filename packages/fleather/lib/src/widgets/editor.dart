@@ -1480,9 +1480,10 @@ class RawEditorState extends EditorState
   }
 
   void _didChangeTextEditingValue() {
-    requestKeyboard();
-
-    _showCaretOnScreen();
+    if (_hasFocus) {
+      requestKeyboard();
+      _showCaretOnScreen();
+    }
     updateRemoteValueIfNeeded();
     _cursorController.startOrStopCursorTimerIfNeeded(
         _hasFocus, widget.controller.selection);
